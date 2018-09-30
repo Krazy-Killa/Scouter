@@ -1,0 +1,8 @@
+
+bot.js
+auth.json
+config.json
+data/*
+node_modules/*
+package-lock.json
+points.json

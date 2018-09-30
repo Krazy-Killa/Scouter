@@ -1,0 +1,16 @@
+{
+  "name": "Powerlevels",
+  "version": "0.2",
+  "description": "My own Discord bot",
+  "main": "bot.js",
+  "author": "Michael",
+  "dependencies": {
+    "better-sqlite-pool": "^0.1.2",
+    "discord.io": "https://github.com/woor/discord.io/tarball/gateway_v6",
+    "discord.js": "^11.4.2",
+    "enmap": "^4.0.6",
+    "enmap-sqlite": "^2.0.5",
+    "numeral": "^2.0.6",
+    "winston": "^3.0.0"
+  }
+}

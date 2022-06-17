@@ -161,7 +161,7 @@ client.on("message", async (message) => {
 				.addField(":crossed_swords:New God Tier", godLevel + 1, true)
 				.addField("Powerlevel", numeral((curPoints * transformation)).format('0.0a'), true)
 				.addField("They will gain roughly:", numeral(addPoints).format('0,0') + " power per message.")
-				.setFooter(`Scouter Bot ${config.version} | © 2019 Krazy-Killa`, config.icon);
+				.setFooter(`Scouter Bot ${config.version} | © 2019 ${config.author}`, config.icon);
 
 			message.channel.send(lvlup).then(msg => {
 				msg.delete(30000);
@@ -176,7 +176,7 @@ client.on("message", async (message) => {
 				.addField(":crossed_swords:New Tier", curLevel + 1, true)
 				.addField("Powerlevel", numeral((curPoints * transformation)).format('0.0a'), true)
 				.addField("They will gain roughly:", numeral(addPoints).format('0,0') + " power per message.")
-				.setFooter(`Scouter Bot ${config.version} | © 2019 Krazy-Killa`, config.icon);
+				.setFooter(`Scouter Bot ${config.version} | © 2019 ${config.author}`, config.icon);
 
 			message.channel.send(lvlup).then(msg => {
 				msg.delete(30000);
@@ -194,7 +194,7 @@ client.on("message", async (message) => {
             .addField(`${config.prefix}leaderboard`, `Shows the current leaderboard \nfor ${message.guild}.`, true)
             .addField(`${config.prefix}transform`, `Basic transformation command that \nwill amplify your power based on the \nform you take.  Keep in mind \nthat you must be a certain tier level to use.`)
             .setColor("#008B8B")
-            .setFooter(`Scouter Bot ${config.version} | © 2019 Krazy-Killa`, config.icon);
+            .setFooter(`Scouter Bot ${config.version} | © 2019 ${config.author}`, config.icon);
         message.channel.send(help).then(msg => {
             msg.delete(30000);
         });
@@ -261,7 +261,7 @@ client.on("message", async (message) => {
             .setAuthor(client.user.username, client.user.avatarURL)
             .setThumbnail(client.users.get(top10[0].userID).avatarURL)
             .setDescription("Our top 10 strongest members!")
-            .setFooter(`Scouter Bot ${config.version} | © 2019 Krazy-Killa`, config.icon)
+            .setFooter(`Scouter Bot ${config.version} | © 2019 ${config.author}`, config.icon)
             .setColor(0x00AE86);
         for (const data of top10) {
 			if (data.godki > 0) {
@@ -289,7 +289,7 @@ client.on("message", async (message) => {
                 .setColor("#FF0000")
                 .addField("Error!", "Additional arguments required!")
                 .addField("Valid arguments are:", "Normal, SSJ, SSJ2, SSJ3, SSG, SSGSS")
-                .setFooter(`Scouter Bot ${config.version} | © 2019 Krazy-Killa`, config.icon);;
+                .setFooter(`Scouter Bot ${config.version} | © 2019 ${config.author}`, config.icon);;
             message.channel.send(syntax).then(msg => {
                 msg.delete(10000);
             });

@@ -2,8 +2,8 @@
   "name": "Powerlevels",
   "version": "0.2",
   "description": "My own Discord bot",
-  "main": "bot.js",
-  "author": "Michael",
+  "main": "xp.js",
+  "author": "Krazy-Killa",
   "dependencies": {
     "better-sqlite-pool": "^0.1.2",
     "discord.io": "https://github.com/woor/discord.io/tarball/gateway_v6",

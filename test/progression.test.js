@@ -3,23 +3,30 @@ const assert = require("node:assert/strict");
 const {
     XP_COOLDOWN_MS,
     REPEATED_MESSAGE_WINDOW_MS,
+    RACES,
+    RACE_LOCK_BASE_POWER,
     addExperience,
     canEarnMessageXp,
+    changeRace,
     createDefaultUser,
     getGodKiBaseMultiplier,
     getGodTierLevel,
+    getGodKiAwakeningChance,
+    getKaiokenMultiplier,
     hasReachedGodTier,
     getSsgMultiplier,
     getProgressAchievementIds,
     getTransformationMultiplier,
     getXpRequiredForLevel,
     initializeUserProgress,
+    isFormAvailableForRace,
     normalizeMessage,
     optInUser,
     optOutUser,
     recordMessageXp,
     recordTrainingDay,
     setBasePower,
+    setKaiokenLevel,
     setUserLevel,
     setTransformation
 } = require("../progression");
@@ -67,6 +74,7 @@ test("sets base power and recalculates the tier from total earned power", () => 
 
 test("clears God Ki and reverts god forms when set power lowers the tier below 50", () => {
     const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
     user.level = 50;
     user.godki = 50;
     setTransformation(user, "ssgss");
@@ -81,6 +89,7 @@ test("clears God Ki and reverts god forms when set power lowers the tier below 5
 
 test("clears God Ki when an admin-set level falls below Tier 50", () => {
     const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
     user.level = 50;
     user.godki = 50;
     setTransformation(user, "ssg");
@@ -94,6 +103,7 @@ test("clears God Ki when an admin-set level falls below Tier 50", () => {
 
 test("updates God Tier transformation scaling when set power raises an unlocked user", () => {
     const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
     user.godki = 50;
     setTransformation(user, "ssg");
     const powerForGodTierTwo = 2500 + Array.from(
@@ -147,6 +157,114 @@ test("initializes new progression fields on existing records", () => {
     assert.deepEqual(legacyUser.achievements, []);
     assert.equal(legacyUser.trainingStreakDays, 0);
     assert.equal(legacyUser.lastTrainingDay, null);
+    assert.equal(legacyUser.godKiAwakeningAttempts, 0);
+    assert.equal(legacyUser.lastGodKiAwakeningAttemptAt, 0);
+});
+
+test("God Ki awakening pity chance doubles after four failed attempts and caps at 100 percent", () => {
+    assert.equal(getGodKiAwakeningChance(0), 0.05);
+    assert.equal(getGodKiAwakeningChance(3), 0.05);
+    assert.equal(getGodKiAwakeningChance(4), 0.1);
+    assert.equal(getGodKiAwakeningChance(5), 0.2);
+    assert.equal(getGodKiAwakeningChance(6), 0.4);
+    assert.equal(getGodKiAwakeningChance(7), 0.8);
+    assert.equal(getGodKiAwakeningChance(8), 1);
+    assert.throws(() => getGodKiAwakeningChance(-1), /non-negative safe integer/);
+});
+
+test("new profiles default to Human while legacy profiles remain Saiyan and high-power profiles lock", () => {
+    assert.equal(createDefaultUser("new", "guild", 0).race, "human");
+    const legacyUser = { userID: "legacy", guildID: "guild", points: 2500 + RACE_LOCK_BASE_POWER };
+
+    initializeUserProgress(legacyUser);
+
+    assert.equal(legacyUser.race, "saiyan");
+    assert.equal(legacyUser.raceLocked, true);
+});
+
+test("race changes are allowed below the base-power threshold and reset the active form", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
+    user.godki = 50;
+    setKaiokenLevel(user, 2);
+    setTransformation(user, "ssg");
+
+    assert.equal(changeRace(user, "human"), true);
+    assert.equal(user.race, "human");
+    assert.equal(user.godki, 50);
+    assert.equal(user.kaiokenLevel, 2);
+    assert.equal(user.transformationForm, "normal");
+    assert.equal(user.transformation, 2);
+});
+
+test("race locks permanently at one million base power", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.points += RACE_LOCK_BASE_POWER - 1;
+    assert.equal(changeRace(user, "namekian"), true);
+
+    addExperience(user, 1);
+    assert.equal(user.raceLocked, true);
+    assert.equal(changeRace(user, "frieza"), false);
+
+    setBasePower(user, 2500);
+    assert.equal(changeRace(user, "frieza"), false);
+});
+
+test("racial transformations are restricted to their races and God Tier scales them", () => {
+    assert.equal(Object.keys(RACES).length, 4);
+    assert.equal(isFormAvailableForRace("ssj", "human"), false);
+    assert.equal(isFormAvailableForRace("golden", "frieza"), true);
+    assert.equal(isFormAvailableForRace("ssg", "namekian"), false);
+    assert.equal(isFormAvailableForRace("normal", "namekian"), true);
+
+    assert.equal(getTransformationMultiplier("potential", 0, 1, "human"), 100);
+    assert.equal(getTransformationMultiplier("potential", 1, 15, "human"), 40000);
+    assert.equal(getTransformationMultiplier("potential", 1, 15, "namekian"), 100000);
+    assert.equal(getTransformationMultiplier("golden", 1, 15, "frieza"), 160000);
+});
+
+test("Kaioken is an ability multiplier that stacks with compatible forms", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    assert.equal(getKaiokenMultiplier(0), 1);
+    assert.equal(getKaiokenMultiplier(2), 2);
+    assert.equal(getKaiokenMultiplier(3), 3);
+    assert.equal(getKaiokenMultiplier(4), 4);
+    assert.equal(getKaiokenMultiplier(10), 10);
+
+    setKaiokenLevel(user, 3);
+    assert.equal(user.transformation, 3);
+
+    user.race = "human";
+    setTransformation(user, "potential");
+    assert.equal(user.transformation, 300);
+
+    user.race = "saiyan";
+    user.godki = 58;
+    user.level = 72;
+    setTransformation(user, "ssgss");
+    assert.equal(user.transformation, 4500000);
+
+    setTransformation(user, "ssj");
+    assert.equal(user.kaiokenLevel, 0);
+    assert.throws(() => setKaiokenLevel(user, 2), /not compatible/);
+});
+
+test("migrates previous standalone Kaioken forms into the ability field", () => {
+    const legacyUser = {
+        userID: "legacy",
+        guildID: "guild",
+        points: 2500,
+        level: 25,
+        race: "human",
+        transformation: 20,
+        transformationForm: "kaioken"
+    };
+
+    initializeUserProgress(legacyUser);
+
+    assert.equal(legacyUser.transformationForm, "normal");
+    assert.equal(legacyUser.kaiokenLevel, 10);
+    assert.equal(legacyUser.transformation, 10);
 });
 
 test("scales Beyond God and SSG multipliers linearly across God Tier 1 through 15", () => {
@@ -186,6 +304,7 @@ test("keeps every god-ki Saiyan form below SSG while preserving form order", () 
 
 test("updates the active god-ki multiplier when the user gains a God Tier", () => {
     const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
     user.godki = 1;
     setTransformation(user, "ssg");
 
@@ -225,6 +344,7 @@ test("God Tier requirements cannot be met before God Ki is awakened", () => {
 
 test("preserves transformation identity for all god-ki forms", () => {
     const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
     user.godki = 1;
 
     setTransformation(user, "ssj2");

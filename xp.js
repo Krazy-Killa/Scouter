@@ -7,22 +7,30 @@ const { existsSync } = require("node:fs");
 const { resolve } = require("node:path");
 const {
     ACHIEVEMENTS,
+    GOD_KI_AWAKENING_COOLDOWN_MS,
     MAX_STAMINA,
+    RACES,
+    RACE_LOCK_BASE_POWER,
     addExperience,
     canEarnMessageXp,
+    changeRace,
     createDefaultUser,
     getGodTierLevel,
+    getGodKiAwakeningChance,
     hasReachedGodTier,
+    getKaiokenMultiplier,
     getProgressAchievementIds,
     getTransformationMultiplier,
     getXpRequiredForLevel,
     initializeUserProgress,
+    isFormAvailableForRace,
     normalizeMessage,
     optInUser,
     optOutUser,
     recordMessageXp,
     recordTrainingDay,
     setBasePower,
+    setKaiokenLevel,
     setUserLevel,
     setTransformation
 } = require("./progression");
@@ -72,11 +80,23 @@ const newUserNoticeState = new Map();
 // One rule table drives transformation access, training rewards, and stamina usage.
 const TRANSFORM_RULES = {
     normal: { minLevel: 1, trainingMultiplier: 1, trainingPenalty: 0, trainingCost: 10, messageDrain: 0 },
+    beyondgod: { minLevel: 50, setGodKi: true, trainingMultiplier: 1, trainingPenalty: 0, trainingCost: 10, messageDrain: 0 },
     ssj: { minLevel: 4, trainingMultiplier: 50, trainingPenalty: 0.024, trainingCost: 500, messageDrain: 1 },
     ssj2: { minLevel: 8, trainingMultiplier: 100, trainingPenalty: 0.04, trainingCost: 1000, messageDrain: 2 },
     ssj3: { minLevel: 16, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 15 },
     ssg: { minLevel: 50, setGodKi: true, trainingMultiplier: 450, trainingPenalty: 0.1, trainingCost: 4500, messageDrain: 5 },
-    ssgss: { minGodTier: 15, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 }
+    ssgss: { minGodTier: 15, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 },
+    potential: { minLevelByRace: { human: 16, namekian: 25 }, trainingMultiplier: 250, trainingPenalty: 0.08, trainingCost: 2500, messageDrain: 6 },
+    giant: { minLevel: 8, trainingMultiplier: 120, trainingPenalty: 0.05, trainingCost: 1200, messageDrain: 4 },
+    final: { minLevel: 8, trainingMultiplier: 120, trainingPenalty: 0.05, trainingCost: 1200, messageDrain: 4 },
+    golden: { minLevel: 25, trainingMultiplier: 600, trainingPenalty: 0.1, trainingCost: 6000, messageDrain: 10 }
+};
+
+const KAIOKEN_RULES = {
+    2: { command: "x2", minLevel: 4, messageDrain: 2, trainingCost: 250, trainingMultiplier: 10, trainingPenalty: 0.01 },
+    3: { command: "x3", minLevel: 8, messageDrain: 5, trainingCost: 500, trainingMultiplier: 15, trainingPenalty: 0.02 },
+    4: { command: "x4", minLevel: 16, messageDrain: 10, trainingCost: 1000, trainingMultiplier: 20, trainingPenalty: 0.04 },
+    10: { command: "x10", minLevel: 25, messageDrain: 25, trainingCost: 3000, trainingMultiplier: 50, trainingPenalty: 0.1 }
 };
 
 // Presentation helpers for the transformation multiplier.
@@ -85,23 +105,30 @@ const borderColor = (form) => {
     if (["ssj", "ssj2", "ssj3"].includes(form)) return "#FFFF00";
     if (form === "ssg") return "#FF2400";
     if (form === "ssgss") return "#00FFFF";
+    if (["golden", "final"].includes(form)) return "#FFD700";
+    if (form === "potential") return "#7B2CBF";
     return "#08ff00";
 };
 
-function transformationName(form, godki = 0) {
+function transformationName(form, godki = 0, race = "saiyan") {
     if (form === "normal") return godki > 0 ? "Beyond God" : "Normal";
+    if (form === "beyondgod") return "Beyond God";
     return {
         ssj: "Super Saiyan",
         ssj2: "Super Saiyan 2",
         ssj3: "Super Saiyan 3",
         ssg: "Super Saiyan God",
-        ssgss: "Super Saiyan God Super Saiyan"
+        ssgss: "Super Saiyan God Super Saiyan",
+        potential: "Potential Unleashed",
+        giant: "Giant Namekian",
+        final: "Final Form",
+        golden: "Golden Form"
     }[form] || "Normal";
 }
 
-const transformLabel = (form, godki = 0) => form === "normal"
+const transformLabel = (form, godki = 0, race = "saiyan") => form === "normal"
     ? ""
-    : `${transformationName(form, godki)} `;
+    : `${transformationName(form, godki, race)} `;
 
 function formatPowerLevel(power) {
     return power < 100000
@@ -152,6 +179,28 @@ function getLevelProgress(user) {
     return { godLevel, currentXp, nextLevelXp, difference: Math.max(0, nextLevelXp - currentXp) };
 }
 
+function getCurrentFormName(user) {
+    const formName = transformationName(getCurrentForm(user), user.godki, user.race);
+    if (user.kaiokenLevel > 0) return `${formName} + Kaioken x${user.kaiokenLevel}`;
+    return formName;
+}
+
+function getStaminaCosts(user, rule) {
+    const kaiokenRule = KAIOKEN_RULES[user.kaiokenLevel];
+    if (!kaiokenRule) return { messageDrain: rule.messageDrain, trainingCost: rule.trainingCost };
+
+    if (getCurrentForm(user) === "normal") {
+        return {
+            messageDrain: kaiokenRule.messageDrain,
+            trainingCost: kaiokenRule.trainingCost
+        };
+    }
+    return {
+        messageDrain: rule.messageDrain * user.kaiokenLevel,
+        trainingCost: rule.trainingCost * user.kaiokenLevel
+    };
+}
+
 function recoverStamina(user, now) {
     if (!Number.isFinite(user.stamina)) user.stamina = MAX_STAMINA;
     user.stamina = Math.max(0, Math.min(MAX_STAMINA, user.stamina));
@@ -167,18 +216,31 @@ function recoverStamina(user, now) {
 }
 
 function getBaseTransformation(user) {
-    return getTransformationMultiplier("normal", user.godki, getGodTierLevel(user) || 1);
+    return getTransformationMultiplier("normal", user.godki, getGodTierLevel(user) || 1, user.race);
 }
 
 function dropTransformation(user) {
-    const fallbackForm = {
-        ssj: "normal",
-        ssj2: "ssj",
-        ssj3: "ssj2",
-        ssg: "normal",
-        ssgss: "ssg"
-    }[getCurrentForm(user)] || "normal";
+    const fallbacks = {
+        saiyan: { ssj: "normal", ssj2: "ssj", ssj3: "ssj2", ssg: "normal", ssgss: "ssg" },
+        human: { potential: "normal" },
+        namekian: { giant: "normal", potential: "giant" },
+        frieza: { final: "normal", golden: "final" }
+    };
+    const fallbackForm = fallbacks[user.race]?.[getCurrentForm(user)] || "normal";
     setTransformation(user, fallbackForm);
+}
+
+function dropPowerup(user) {
+    if (user.kaiokenLevel > 2) {
+        const lowerLevels = { 10: 4, 4: 3, 3: 2 };
+        setKaiokenLevel(user, lowerLevels[user.kaiokenLevel]);
+        return;
+    }
+    if (user.kaiokenLevel === 2) {
+        setKaiokenLevel(user, 0);
+        return;
+    }
+    dropTransformation(user);
 }
 
 function getCurrentForm(user) {
@@ -199,9 +261,10 @@ function getProfileDetails(user) {
         : `Tier ${user.level}`;
     return [
         `**Tier:** ${tier}`,
+        `**Race:** ${RACES[user.race]?.name || RACES.saiyan.name}`,
         `**Base power:** ${numeral(user.points - 2500).format("0,0")}`,
         `**Displayed power:** ${formatPowerLevel(user.points * user.transformation)}`,
-        `**Current form:** ${transformationName(getCurrentForm(user), user.godki)}`,
+        `**Current form:** ${getCurrentFormName(user)}`,
         `**Stamina:** ${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`,
         `**Next tier:** ${levelProgress.difference > 0
             ? `${numeral(levelProgress.difference).format("0,0")} more power needed`
@@ -317,7 +380,7 @@ async function handleMessage(message) {
     const isCommand = message.content.startsWith(config.prefix);
     const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
     const command = args.length > 0 ? args.shift().toLowerCase() : null;
-    if (["help", "profile", "compare", "scan", "leaderboard", "achievements", "train", "transform", "revert", "setlevel", "setpower", "awardpower", "reset", "privacy"].includes(command)) {
+    if (["help", "profile", "compare", "scan", "leaderboard", "achievements", "train", "transform", "kaioken", "revert", "race", "setlevel", "setpower", "awardpower", "reset", "privacy"].includes(command)) {
         waitAndDelete(message, 1500);
     }
 
@@ -417,7 +480,7 @@ async function handleMessage(message) {
                     .addFields(
                         { name: "Power reading", value: `⚡ **${formatPowerLevel(scannedUser.points * scannedUser.transformation)}**`, inline: true },
                         { name: "Base power", value: numeral(scannedUser.points - 2500).format("0,0"), inline: true },
-                        { name: "Signal profile", value: `${tier} • ${transformationName(getCurrentForm(scannedUser), scannedUser.godki)}`, inline: true },
+                        { name: "Signal profile", value: `${RACES[scannedUser.race].name} • ${tier} • ${getCurrentFormName(scannedUser)}`, inline: true },
                         { name: "Stamina", value: `${numeral(Math.floor(scannedUser.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true },
                         {
                             name: "Next tier",
@@ -463,6 +526,86 @@ async function handleMessage(message) {
     recoverStamina(user, rightNow);
     client.points.set(key, user);
 
+    if (command === "race") {
+        const raceName = args.join(" ").trim().toLowerCase();
+        if (!Object.prototype.hasOwnProperty.call(RACES, raceName)) {
+            return replyTemporary(
+                message,
+                `Choose a race: ${Object.entries(RACES).map(([id, race]) => `\`${id}\` (${race.name})`).join(", ")}.`,
+                10000,
+                "race usage response"
+            );
+        }
+        if (user.race === raceName) {
+            return replyTemporary(message, `You are already a ${RACES[raceName].name}.`, 10000, "race unchanged response");
+        }
+        if (!changeRace(user, raceName)) {
+            return replyTemporary(
+                message,
+                `Your race is locked after reaching ${numeral(RACE_LOCK_BASE_POWER).format("0,0")} base power.`,
+                10000,
+                "race locked response"
+            );
+        }
+        client.points.set(key, user);
+        return sendTemporary(
+            message.channel,
+            `Your race is now ${RACES[raceName].name}. Your form has returned to ${transformationName("normal", user.godki, user.race)}.${user.kaiokenLevel > 0 ? ` Kaioken x${user.kaiokenLevel} remains active.` : ""}`,
+            10000,
+            "race change confirmation"
+        );
+    }
+
+    if (command === "kaioken") {
+        const requestedLevel = args[0]?.toLowerCase();
+        if (["off", "disable", "0"].includes(requestedLevel)) {
+            if (user.kaiokenLevel === 0) {
+                return replyTemporary(message, "Kaioken is already disabled.", 10000, "Kaioken state response");
+            }
+            setKaiokenLevel(user, 0);
+            client.points.set(key, user);
+            return sendTemporary(message.channel, "Kaioken ability disabled.", 10000, "Kaioken disabled response");
+        }
+
+        const level = Number(requestedLevel?.replace(/^x/, ""));
+        const rule = KAIOKEN_RULES[level];
+        if (!rule) {
+            return replyTemporary(
+                message,
+                `Choose a Kaioken level: \`${config.prefix}kaioken x2\`, \`x3\`, \`x4\`, \`x10\`, or \`off\`.`,
+                10000,
+                "Kaioken usage response"
+            );
+        }
+        if (user.level < rule.minLevel) {
+            return replyTemporary(message, `Reach Tier ${rule.minLevel} to unlock Kaioken x${level}.`, 10000, "Kaioken level response");
+        }
+        if (user.kaiokenLevel === level) {
+            return replyTemporary(message, `Kaioken x${level} is already active.`, 10000, "Kaioken unchanged response");
+        }
+        if (["ssj", "ssj2", "ssj3"].includes(getCurrentForm(user))) {
+            return replyTemporary(
+                message,
+                "Kaioken cannot be used with Super Saiyan, Super Saiyan 2, or Super Saiyan 3 because their ki is unstable. Transform out of that form first.",
+                10000,
+                "Kaioken instability response"
+            );
+        }
+        if (user.stamina <= 0) {
+            return replyTemporary(message, "You're out of stamina and need to recover before using Kaioken.", 10000, "Kaioken stamina response");
+        }
+
+        setKaiokenLevel(user, level);
+        awardAchievements(message, user, ["form_kaioken"]);
+        client.points.set(key, user);
+        return sendTemporary(
+            message.channel,
+            `Kaioken x${level} is active on ${transformationName(getCurrentForm(user), user.godki, user.race)}. Current power: ${formatPowerLevel(user.points * user.transformation)}.`,
+            10000,
+            "Kaioken activation response"
+        );
+    }
+
     if (!isCommand) {
         if (message.content.length < config.minsize) return;
 
@@ -471,13 +614,13 @@ async function handleMessage(message) {
 
         // Ordinary chat grants progression XP and drains stamina while transformed.
         const form = getCurrentForm(user);
-        const staminaCost = TRANSFORM_RULES[form].messageDrain;
+        const { messageDrain: staminaCost } = getStaminaCosts(user, TRANSFORM_RULES[form]);
         if (staminaCost > 0) {
             if (user.stamina <= 0) {
-                dropTransformation(user);
+                dropPowerup(user);
             } else {
                 user.stamina = Math.max(0, user.stamina - staminaCost);
-                if (user.stamina === 0) dropTransformation(user);
+                if (user.stamina === 0) dropPowerup(user);
             }
         }
 
@@ -505,7 +648,9 @@ async function handleMessage(message) {
                 { name: `${config.prefix}leaderboard`, value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
                 { name: `${config.prefix}achievements`, value: "Shows your unlocked achievements and progress.", inline: true },
                 { name: `${config.prefix}privacy`, value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
-                { name: `${config.prefix}transform`, value: "Changes your form, which drains stamina as you chat. Super Saiyan God unlocks at Tier 50; Super Saiyan God Super Saiyan requires God Tier 15 after awakening God Ki." },
+                { name: `${config.prefix}race <race>`, value: `Choose Saiyan, Human, Namekian, or Frieza Race before reaching ${numeral(RACE_LOCK_BASE_POWER).format("0,0")} base power.` },
+                { name: `${config.prefix}transform <form>`, value: `Changes your form. Beyond God attempts to awaken God Ki at Tier 50 (5% chance, one try every 12 hours; pity chance rises after four failures). First-time Saiyan SSG awakening requires five other Saiyan helpers. Kaioken can stack with SSG, SSGSS, and Potential Unleashed, but not SSJ/SSJ2/SSJ3.` },
+                { name: `${config.prefix}kaioken <x2|x3|x4|x10|off>`, value: "Activates or disables the universal Kaioken ability. Stamina drain is amplified when stacked with another form." },
                 { name: `${config.prefix}revert`, value: "Automatically reverts you to your normal form." },
                 { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." },
                 { name: `${config.prefix}setlevel @user <level>`, value: "Set a member's tier (server owner only)." },
@@ -580,7 +725,7 @@ async function handleMessage(message) {
         if (command === "profile") {
             const profileEmbed = new EmbedBuilder()
                 .setAuthor({
-                    name: `${transformLabel(getCurrentForm(profile), profile.godki)}${displayName}`,
+                    name: `${transformLabel(getCurrentForm(profile), profile.godki, profile.race)}${displayName}`,
                     iconURL: targetUser.displayAvatarURL({ extension: "png", size: 64 })
                 })
                 .setThumbnail(targetUser.displayAvatarURL({ dynamic: true, size: 256 }))
@@ -666,12 +811,12 @@ async function handleMessage(message) {
                             ? `God Tier ${data.level - data.godki + 1}`
                             : `Tier ${data.level}`;
                         const currentForm = data.transformationForm || "normal";
-                        const transformationLabel = currentForm === "normal"
+                        const transformationLabel = currentForm === "normal" && !data.kaiokenLevel
                             ? ""
-                            : `  •  ${transformationName(currentForm, data.godki)}`;
+                            : `  •  ${getCurrentFormName(data)}`;
                         const powerLevel = formatPowerLevel(data.points * data.transformation);
 
-                        return `${rankLabel} <@${data.userID}>\n└ ${tierLabel}${transformationLabel}  •  **${powerLevel}** power`;
+                        return `${rankLabel} <@${data.userID}>\n└ ${RACES[data.race]?.name || RACES.saiyan.name} • ${tierLabel}${transformationLabel}  •  **${powerLevel}** power`;
                     }).join("\n\n"),
                     inline: true
                 }));
@@ -752,19 +897,28 @@ async function handleMessage(message) {
 
         const form = getCurrentForm(user);
         const rule = TRANSFORM_RULES[form];
-        if (user.stamina < rule.trainingCost) {
-            return replyTemporary(message, `Not enough stamina to train in ${transformationName(form, user.godki)}. You need ${numeral(rule.trainingCost).format("0,0")} stamina; you have ${numeral(Math.floor(user.stamina)).format("0,0")}.`, 10000, "training stamina response");
+        const { trainingCost } = getStaminaCosts(user, rule);
+        const trainingFormName = getCurrentFormName(user);
+        if (user.stamina < trainingCost) {
+            return replyTemporary(message, `Not enough stamina to train in ${trainingFormName}. You need ${numeral(trainingCost).format("0,0")} stamina; you have ${numeral(Math.floor(user.stamina)).format("0,0")}.`, 10000, "training stamina response");
         }
 
-        const rawPower = BASE_TRAINING_POWER * rule.trainingMultiplier;
-        const powerGained = Math.floor(rawPower * (1 - rule.trainingPenalty));
-        user.stamina = Math.max(0, user.stamina - rule.trainingCost);
+        const kaiokenRule = KAIOKEN_RULES[user.kaiokenLevel];
+        const trainingMultiplier = form === "normal" && kaiokenRule
+            ? kaiokenRule.trainingMultiplier
+            : rule.trainingMultiplier * getKaiokenMultiplier(user.kaiokenLevel);
+        const trainingPenalty = form === "normal" && kaiokenRule
+            ? kaiokenRule.trainingPenalty
+            : rule.trainingPenalty;
+        const rawPower = BASE_TRAINING_POWER * trainingMultiplier;
+        const powerGained = Math.floor(rawPower * (1 - trainingPenalty));
+        user.stamina = Math.max(0, user.stamina - trainingCost);
         recordTrainingDay(user, rightNow);
         user.trainLastUsedAt = rightNow;
         const levelsGained = addExperience(user, powerGained);
 
-        const droppedForm = user.stamina === 0 && user.transformation !== getBaseTransformation(user);
-        if (droppedForm) dropTransformation(user);
+        const droppedPowerup = user.stamina === 0 && user.transformation !== getBaseTransformation(user);
+        if (droppedPowerup) dropPowerup(user);
 
         const trainingAchievements = ["trained_once"];
         if (user.trainingStreakDays >= 7) trainingAchievements.push("training_streak_7");
@@ -773,13 +927,13 @@ async function handleMessage(message) {
 
         const trainingEmbed = new EmbedBuilder()
             .setTitle(`${message.author.username} finished training!`)
-            .setDescription(droppedForm
-                ? "The training drained your stamina and forced you to drop a form."
-                : `Training in ${transformationName(form, user.godki)} converted stamina into power.`)
+            .setDescription(droppedPowerup
+                ? "The training drained your stamina and forced you to lower a form or Kaioken level."
+                : `Training in ${trainingFormName} converted stamina into power.`)
             .setColor("#08ff00")
             .addFields(
                 { name: "Power gained", value: numeral(powerGained).format("0,0"), inline: true },
-                { name: "Stamina used", value: numeral(rule.trainingCost).format("0,0"), inline: true },
+                { name: "Stamina used", value: numeral(trainingCost).format("0,0"), inline: true },
                 { name: "Stamina remaining", value: `${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true },
                 { name: "Current power level", value: formatPowerLevel(user.points * user.transformation), inline: true }
             )
@@ -794,9 +948,10 @@ async function handleMessage(message) {
         setTransformation(user, "normal");
         client.points.set(key, user);
         const baseForm = user.godki > 0 ? "Beyond God" : "Normal";
+        const kaiokenNotice = user.kaiokenLevel > 0 ? ` Kaioken x${user.kaiokenLevel} remains active.` : "";
         await sendTemporary(
             message.channel,
-            `Reverted to ${baseForm}. Your power level is now ${formatPowerLevel(user.points * user.transformation)}.`,
+            `Reverted to ${baseForm}.${kaiokenNotice} Your power level is now ${formatPowerLevel(user.points * user.transformation)}.`,
             10000,
             "revert confirmation"
         );
@@ -805,15 +960,16 @@ async function handleMessage(message) {
 
     // Transformation changes require an unlocked form and available stamina.
     if (command === "transform") {
-        const form = args.length > 0 ? args[0].toLowerCase() : null;
+        const requestedForm = args.length > 0 ? args[0].toLowerCase() : null;
 
-        if (!form || !Object.prototype.hasOwnProperty.call(TRANSFORM_RULES, form)) {
+        const validForms = ["normal", "beyondgod", ...RACES[user.race].forms];
+        if (!requestedForm || !Object.prototype.hasOwnProperty.call(TRANSFORM_RULES, requestedForm)) {
             const invalidTransform = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(getCurrentForm(user), user.godki)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+                .setAuthor({ name: `${transformLabel(getCurrentForm(user), user.godki, user.race)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setColor("#FF0000")
                 .addFields(
-                    { name: "Error!", value: "Additional arguments required!" },
-                    { name: "Valid arguments are:", value: "`normal` (Normal/Beyond God), `ssj` (Super Saiyan), `ssj2` (Super Saiyan 2), `ssj3` (Super Saiyan 3), `ssg` (Super Saiyan God), `ssgss` (Super Saiyan God Super Saiyan)." }
+                    { name: "Error!", value: "Choose a valid form for your race." },
+                    { name: "Valid arguments are:", value: validForms.map((form) => `\`${form}\` (${transformationName(form, user.godki, user.race)})`).join(", ") }
                 )
                 .setFooter({ text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
@@ -821,46 +977,149 @@ async function handleMessage(message) {
             return;
         }
 
-        const rule = TRANSFORM_RULES[form];
+        const rule = TRANSFORM_RULES[requestedForm];
+        if (requestedForm !== "beyondgod" && !isFormAvailableForRace(requestedForm, user.race)) {
+            return replyTemporary(
+                message,
+                `${transformationName(requestedForm, user.godki, user.race)} is only available to the appropriate race.`,
+                10000,
+                "race transformation restriction response"
+            );
+        }
+        const requiredLevel = rule.minLevelByRace?.[user.race] ?? rule.minLevel;
         const meetsRequirement = rule.minGodTier
             ? hasReachedGodTier(user, rule.minGodTier)
-            : user.level >= rule.minLevel;
+            : user.level >= requiredLevel;
         if (!meetsRequirement) {
             const lowLevelWarning = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(getCurrentForm(user), user.godki)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+                .setAuthor({ name: `${transformLabel(getCurrentForm(user), user.godki, user.race)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setColor("#FF0000")
                 .addFields({
                     name: rule.minGodTier ? "God Tier too low!" : "Level too low!",
                     value: rule.minGodTier
-                        ? `Awaken God Ki with Super Saiyan God, then reach God Tier ${rule.minGodTier} to unlock Super Saiyan God Super Saiyan.`
-                        : "Additional power required to transform."
+                        ? `Awaken God Ki, then reach God Tier ${rule.minGodTier} to unlock Super Saiyan God Super Saiyan.`
+                        : `Reach Tier ${requiredLevel} to unlock ${transformationName(requestedForm, user.godki, user.race)}.`
                 });
 
             sendTemporary(message.channel, { embeds: [lowLevelWarning] }, 10000, "level requirement response");
             return;
         }
 
+        const form = requestedForm === "beyondgod" ? "normal" : requestedForm;
+        if (user.kaiokenLevel > 0 && ["ssj", "ssj2", "ssj3"].includes(form)) {
+            return replyTemporary(
+                message,
+                "Super Saiyan, Super Saiyan 2, and Super Saiyan 3 cannot be combined with Kaioken because their ki is unstable. Disable Kaioken first.",
+                10000,
+                "transformation instability response"
+            );
+        }
         if (form !== "normal" && user.stamina <= 0) {
             return replyTemporary(message, "You're out of stamina and need to recover before transforming.", 10000, "transformation stamina response");
         }
 
-        if (form === "normal") {
+        if (requestedForm === "beyondgod") {
+            if (user.godki > 0) {
+                setTransformation(user, "normal");
+            } else {
+                const cooldownRemaining = GOD_KI_AWAKENING_COOLDOWN_MS
+                    - (rightNow - user.lastGodKiAwakeningAttemptAt);
+                if (cooldownRemaining > 0) {
+                    const hoursRemaining = Math.ceil(cooldownRemaining / (60 * 60 * 1000));
+                    return replyTemporary(
+                        message,
+                        `Your next God Ki awakening attempt is available in about ${hoursRemaining} hour(s).`,
+                        10000,
+                        "God Ki awakening cooldown response"
+                    );
+                }
+
+                const chance = getGodKiAwakeningChance(user.godKiAwakeningAttempts);
+                user.lastGodKiAwakeningAttemptAt = rightNow;
+                if (Math.random() >= chance) {
+                    user.godKiAwakeningAttempts += 1;
+                    client.points.set(key, user);
+                    return sendTemporary(
+                        message.channel,
+                        `Your attempt to awaken God Ki failed (${Math.round(chance * 100)}% chance). Try again in 12 hours. Your chance will rise after four failed attempts.`,
+                        10000,
+                        "God Ki awakening failure response"
+                    );
+                }
+
+                user.godki = user.level;
+                user.godKiAwakeningAttempts = 0;
+                setTransformation(user, "normal");
+                awardAchievements(message, user, ["form_beyondgod"]);
+            }
+        } else if (form === "normal") {
             setTransformation(user, "normal");
         } else {
-            if (rule.setGodKi && user.godki < 1) user.godki = user.level;
+            if (requestedForm === "ssg" && user.godki < 1) {
+                if (user.kaiokenLevel > 0) {
+                    return replyTemporary(
+                        message,
+                        "Disable Kaioken before awakening Super Saiyan God.",
+                        10000,
+                        "SSG awakening Kaioken response"
+                    );
+                }
+                const helperIds = [...message.mentions.users.values()]
+                    .map((helper) => helper.id)
+                    .filter((id) => id !== message.author.id);
+                const uniqueHelperIds = [...new Set(helperIds)];
+                if (uniqueHelperIds.length !== 5) {
+                    return replyTemporary(
+                        message,
+                        `Your first Super Saiyan God awakening requires exactly five other Saiyan helpers. Mention them: \`${config.prefix}transform ssg @one @two @three @four @five\`.`,
+                        10000,
+                        "SSG awakening helper count response"
+                    );
+                }
+
+                const helpers = uniqueHelperIds.map((helperId) => ({
+                    id: helperId,
+                    profile: client.points.get(`${message.guild.id}-${helperId}`)
+                }));
+                for (const { id, profile } of helpers) {
+                    if (!profile) {
+                        return replyTemporary(
+                            message,
+                            "All five helpers must have an existing Saiyan progression profile in this server.",
+                            10000,
+                            "SSG awakening helper profile response"
+                        );
+                    }
+                    initializeUserProgress(profile);
+                    client.points.set(`${message.guild.id}-${id}`, profile);
+                    if (profile.race !== "saiyan") {
+                        return replyTemporary(
+                            message,
+                            "All five helpers must be Saiyans.",
+                            10000,
+                            "SSG awakening helper race response"
+                        );
+                    }
+                }
+
+                user.godki = user.level;
+            } else if (rule.setGodKi && user.godki < 1) {
+                user.godki = user.level;
+            }
             setTransformation(user, form);
         }
 
-        if (form !== "normal") awardAchievements(message, user, [`form_${form}`]);
+        if (requestedForm !== "normal") awardAchievements(message, user, [`form_${requestedForm}`]);
         client.points.set(key, user);
 
         const transformedLevel = user.transformation;
         const transformedProgress = getLevelProgress(user);
+        const isRevert = requestedForm === "normal";
         const transformEmbed = new EmbedBuilder()
-            .setTitle(form !== "normal" ? `${message.author.username} transformed!` : `${message.author.username} reverted to ${transformationName(form, user.godki)}!`)
-            .setDescription(form !== "normal" ? "Transformations amplify your power depending on the form you choose!" : "You reverted to your base form.")
-            .setAuthor({ name: `${transformLabel(form, user.godki)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+            .setTitle(isRevert ? `${message.author.username} reverted to ${getCurrentFormName(user)}!` : `${message.author.username} transformed!`)
+            .setDescription(isRevert ? "You reverted to your base form." : "Your active form and abilities amplify your power.")
+            .setAuthor({ name: `${transformLabel(requestedForm, user.godki, user.race)}${user.kaiokenLevel > 0 ? `Kaioken x${user.kaiokenLevel} ` : ""}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
             .setColor(borderColor(form))
             .addFields(

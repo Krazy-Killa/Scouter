@@ -12,9 +12,13 @@ class TestStore extends Map {
 function createMessage(content, userId = "user", targetUser = null) {
     const sent = [];
     const replied = [];
-    const targetMember = targetUser
-        ? { id: targetUser.id, user: targetUser, displayName: targetUser.username || targetUser.id }
-        : null;
+    const targetUsers = Array.isArray(targetUser) ? targetUser : targetUser ? [targetUser] : [];
+    const targetMembers = targetUsers.map((user) => ({
+        id: user.id,
+        user,
+        displayName: user.username || user.id
+    }));
+    const targetMember = targetMembers[0] || null;
     const author = {
         id: userId,
         username: userId,
@@ -36,12 +40,15 @@ function createMessage(content, userId = "user", targetUser = null) {
             id: "guild",
             name: "Test Guild",
             ownerId: "owner",
-            members: { cache: new Map(targetMember ? [[targetMember.id, targetMember]] : []) }
+            members: { cache: new Map(targetMembers.map((member) => [member.id, member])) }
         },
         channel,
         mentions: {
             members: { first: () => targetMember },
-            users: { first: () => targetUser }
+            users: {
+                first: () => targetUsers[0] || null,
+                values: () => targetUsers.values()
+            }
         },
         delete: async () => {},
         reply: async (payload) => {
@@ -90,10 +97,17 @@ test("privacy opt-out blocks progression and opt-in starts a fresh record", asyn
 test("SSGSS command requires God Tier 15 after awakening God Ki", async () => {
     const key = "guild-user";
     const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
     user.level = 58;
     client.points.set(key, user);
 
-    await handleMessage(createMessage("!transform ssg").message);
+    const helpers = Array.from({ length: 5 }, (_, index) => ({ id: `helper-${index}`, username: `helper-${index}` }));
+    for (const helper of helpers) {
+        const helperProfile = createDefaultUser(helper.id, "guild", 0);
+        helperProfile.race = "saiyan";
+        client.points.set(`guild-${helper.id}`, helperProfile);
+    }
+    await handleMessage(createMessage("!transform ssg", "user", helpers).message);
     assert.equal(user.godki, 58);
     assert.equal(user.transformationForm, "ssg");
 
@@ -106,9 +120,83 @@ test("SSGSS command requires God Tier 15 after awakening God Ki", async () => {
     assert.equal(user.transformationForm, "ssgss");
 });
 
+test("Beyond God awakening uses a 12-hour attempt cooldown and escalating pity chance", async () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.level = 50;
+    client.points.set("guild-user", user);
+
+    const originalRandom = Math.random;
+    Math.random = () => 0.99;
+    try {
+        await handleMessage(createMessage("!transform beyondgod").message);
+    } finally {
+        Math.random = originalRandom;
+    }
+    assert.equal(user.godki, 0);
+    assert.equal(user.godKiAwakeningAttempts, 1);
+    assert.ok(user.lastGodKiAwakeningAttemptAt > 0);
+
+    const cooldownAttempt = createMessage("!transform beyondgod");
+    await handleMessage(cooldownAttempt.message);
+    assert.match(cooldownAttempt.replied[0].payload, /available in about 12 hour/i);
+    assert.equal(user.godKiAwakeningAttempts, 1);
+
+    user.godKiAwakeningAttempts = 4;
+    user.lastGodKiAwakeningAttemptAt = Date.now() - 12 * 60 * 60 * 1000;
+    Math.random = () => 0.09;
+    try {
+        await handleMessage(createMessage("!transform beyondgod").message);
+    } finally {
+        Math.random = originalRandom;
+    }
+    assert.equal(user.godki, 50);
+    assert.equal(user.godKiAwakeningAttempts, 0);
+});
+
+test("first Saiyan SSG awakening requires five other persisted Saiyan profiles", async () => {
+    const saiyan = createDefaultUser("user", "guild", 0);
+    saiyan.race = "saiyan";
+    saiyan.level = 50;
+    client.points.set("guild-user", saiyan);
+
+    const missingHelpers = createMessage("!transform ssg");
+    await handleMessage(missingHelpers.message);
+    assert.equal(saiyan.godki, 0);
+    assert.match(missingHelpers.replied[0].payload, /exactly five other Saiyan helpers/i);
+
+    const helpers = Array.from({ length: 5 }, (_, index) => ({ id: `saiyan-${index}`, username: `saiyan-${index}` }));
+    for (const helper of helpers) {
+        const profile = createDefaultUser(helper.id, "guild", 0);
+        profile.race = "saiyan";
+        client.points.set(`guild-${helper.id}`, profile);
+    }
+    await handleMessage(createMessage("!transform ssg", "user", helpers).message);
+    assert.equal(saiyan.godki, 50);
+    assert.equal(saiyan.transformationForm, "ssg");
+});
+
+test("first Saiyan SSG awakening rejects non-Saiyan helpers", async () => {
+    const saiyan = createDefaultUser("user", "guild", 0);
+    saiyan.race = "saiyan";
+    saiyan.level = 50;
+    client.points.set("guild-user", saiyan);
+    const helpers = Array.from({ length: 5 }, (_, index) => ({ id: `helper-${index}`, username: `helper-${index}` }));
+    helpers.forEach((helper, index) => {
+        const profile = createDefaultUser(helper.id, "guild", 0);
+        profile.race = index === 0 ? "human" : "saiyan";
+        client.points.set(`guild-${helper.id}`, profile);
+    });
+
+    const attempt = createMessage("!transform ssg", "user", helpers);
+    await handleMessage(attempt.message);
+    assert.equal(saiyan.godki, 0);
+    assert.match(attempt.replied[0].payload, /all five helpers must be Saiyans/i);
+});
+
 test("high overall level cannot bypass the God Ki awakening requirement", async () => {
     const key = "guild-user";
     const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
     user.level = 100;
     client.points.set(key, user);
 
@@ -117,7 +205,213 @@ test("high overall level cannot bypass the God Ki awakening requirement", async 
 
     assert.equal(user.godki, 0);
     assert.equal(user.transformationForm, "normal");
-    assert.match(attempt.sent[0].payload.embeds[0].data.fields[0].value, /Awaken God Ki with Super Saiyan God/);
+    assert.match(attempt.sent[0].payload.embeds[0].data.fields[0].value, /Awaken God Ki/);
+});
+
+test("users can change race before the lock, and non-Saiyans can awaken universal God Ki", async () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
+    client.points.set("guild-user", user);
+
+    await handleMessage(createMessage("!race human").message);
+    assert.equal(user.race, "human");
+
+    const saiyanForm = createMessage("!transform ssj");
+    await handleMessage(saiyanForm.message);
+    assert.match(saiyanForm.replied[0].payload, /only available to the appropriate race/i);
+
+    user.level = 4;
+    await handleMessage(createMessage("!kaioken x2").message);
+    assert.equal(user.kaiokenLevel, 2);
+    assert.equal(user.transformation, 2);
+
+    user.level = 50;
+    const originalRandom = Math.random;
+    Math.random = () => 0;
+    try {
+        await handleMessage(createMessage("!transform beyondgod").message);
+    } finally {
+        Math.random = originalRandom;
+    }
+    assert.equal(user.godki, 50);
+    assert.equal(user.transformationForm, "normal");
+
+    await handleMessage(createMessage("!transform potential").message);
+    assert.equal(user.transformationForm, "potential");
+    assert.equal(user.transformation, 200);
+});
+
+test("race command refuses changes after base power reaches the permanent lock", async () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.points = 2500 + 1000000;
+    client.points.set("guild-user", user);
+
+    const attempt = createMessage("!race namekian");
+    await handleMessage(attempt.message);
+
+    assert.equal(user.race, "human");
+    assert.equal(user.raceLocked, true);
+    assert.match(attempt.replied[0].payload, /race is locked/i);
+});
+
+test("each race can use its own unlocked transformation path", async () => {
+    const cases = [
+        ["saiyan", 4, "ssj"],
+        ["human", 16, "potential"],
+        ["namekian", 25, "potential"],
+        ["frieza", 25, "golden"]
+    ];
+
+    for (const [race, level, form] of cases) {
+        const user = createDefaultUser("user", "guild", 0);
+        user.race = race;
+        user.level = level;
+        client.points.set("guild-user", user);
+
+        await handleMessage(createMessage(`!transform ${form}`).message);
+        assert.equal(user.transformationForm, form, `${race} should be able to use ${form}`);
+    }
+});
+
+test("Kaioken ability is universal and each multiplier unlocks at its configured tier", async () => {
+    const cases = [
+        [4, "x2", 2],
+        [8, "x3", 3],
+        [16, "x4", 4],
+        [25, "x10", 10]
+    ];
+
+    for (const race of ["saiyan", "human", "namekian", "frieza"]) {
+        for (const [level, ability, multiplier] of cases) {
+            const user = createDefaultUser("user", "guild", 0);
+            user.race = race;
+            user.level = level;
+            client.points.set("guild-user", user);
+
+            await handleMessage(createMessage(`!kaioken ${ability}`).message);
+            assert.equal(user.kaiokenLevel, multiplier, `${race} at Tier ${level} should use Kaioken ${ability}`);
+            assert.equal(user.transformationForm, "normal");
+        }
+    }
+});
+
+test("Kaioken x10 remains locked until Tier 25", async () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.level = 24;
+    client.points.set("guild-user", user);
+
+    const lockedAttempt = createMessage("!kaioken x10");
+    await handleMessage(lockedAttempt.message);
+    assert.equal(user.transformationForm, "normal");
+    assert.match(lockedAttempt.replied[0].payload, /Reach Tier 25/);
+
+    user.level = 25;
+    await handleMessage(createMessage("!kaioken x10").message);
+    assert.equal(user.kaiokenLevel, 10);
+});
+
+test("Kaioken training consumes its ability stamina cost at each unlocked multiplier", async () => {
+    const cases = [
+        [4, "x2", 250],
+        [8, "x3", 500],
+        [16, "x4", 1000],
+        [25, "x10", 3000]
+    ];
+
+    for (const [level, ability, staminaCost] of cases) {
+        const user = createDefaultUser("user", "guild", 0);
+        user.level = level;
+        client.points.set("guild-user", user);
+
+        await handleMessage(createMessage(`!kaioken ${ability}`).message);
+        user.stamina = 10000;
+        user.staminaUpdatedAt = Date.now();
+        await handleMessage(createMessage("!train").message);
+        assert.equal(user.stamina, 10000 - staminaCost, `${ability} should cost ${staminaCost} stamina to train`);
+    }
+});
+
+test("Kaioken x10 drains 25 stamina per eligible message and drops to x4 when exhausted", async () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.race = "frieza";
+    user.level = 25;
+    client.points.set("guild-user", user);
+
+    await handleMessage(createMessage("!kaioken x10").message);
+    assert.equal(user.kaiokenLevel, 10);
+
+    user.stamina = 100;
+    user.staminaUpdatedAt = Date.now();
+    await handleMessage(createMessage("A message while using Kaioken x10").message);
+    assert.equal(user.stamina, 75);
+
+    user.stamina = 24;
+    user.staminaUpdatedAt = Date.now();
+    user.lastXpAt = 0;
+    await handleMessage(createMessage("Another message using Kaioken x10").message);
+    assert.equal(user.stamina, 0);
+    assert.equal(user.kaiokenLevel, 4);
+});
+
+test("Kaioken stacks with SSGSS and Potential Unleashed and multiplies stamina costs", async () => {
+    const human = createDefaultUser("user", "guild", 0);
+    human.level = 16;
+    client.points.set("guild-user", human);
+
+    await handleMessage(createMessage("!kaioken x3").message);
+    await handleMessage(createMessage("!transform potential").message);
+    assert.equal(human.transformationForm, "potential");
+    assert.equal(human.transformation, 300);
+
+    human.stamina = 100;
+    human.staminaUpdatedAt = Date.now();
+    await handleMessage(createMessage("Potential with Kaioken").message);
+    assert.equal(human.stamina, 82);
+
+    human.stamina = 10000;
+    human.staminaUpdatedAt = Date.now();
+    human.trainLastUsedAt = 0;
+    await handleMessage(createMessage("!train").message);
+    assert.equal(human.stamina, 2500);
+
+    await handleMessage(createMessage("!kaioken off").message);
+    assert.equal(human.kaiokenLevel, 0);
+    assert.equal(human.transformation, 100);
+
+    const saiyan = createDefaultUser("user", "guild", 0);
+    saiyan.race = "saiyan";
+    saiyan.level = 72;
+    saiyan.godki = 58;
+    client.points.set("guild-user", saiyan);
+
+    await handleMessage(createMessage("!kaioken x2").message);
+    await handleMessage(createMessage("!transform ssgss").message);
+    assert.equal(saiyan.transformationForm, "ssgss");
+    assert.equal(saiyan.kaiokenLevel, 2);
+    assert.equal(saiyan.transformation, 3000000);
+});
+
+test("Kaioken cannot be activated with unstable Super Saiyan forms", async () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.race = "saiyan";
+    user.level = 4;
+    client.points.set("guild-user", user);
+
+    await handleMessage(createMessage("!transform ssj").message);
+    const abilityAttempt = createMessage("!kaioken x2");
+    await handleMessage(abilityAttempt.message);
+    assert.equal(user.kaiokenLevel, 0);
+    assert.match(abilityAttempt.replied[0].payload, /ki is unstable/i);
+
+    user.transformationForm = "normal";
+    user.transformation = 1;
+    await handleMessage(createMessage("!kaioken x2").message);
+    const formAttempt = createMessage("!transform ssj2");
+    user.level = 8;
+    await handleMessage(formAttempt.message);
+    assert.equal(user.transformationForm, "normal");
+    assert.equal(user.kaiokenLevel, 2);
+    assert.match(formAttempt.replied[0].payload, /disable Kaioken first/i);
 });
 
 test("leaderboard normalizes and persists legacy god-ki transformation forms", async () => {

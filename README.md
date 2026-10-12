@@ -1,5 +1,5 @@
 # Scouter
-An RPG-style Discord progression bot where members earn power through chat and training, unlock Saiyan transformations and god ki, and compete on server leaderboards.
+An RPG-style Discord progression bot where members earn power through chat and training, unlock race-specific forms and universal God Ki, and compete on server leaderboards.
 
 ## Setup
 
@@ -65,8 +65,10 @@ Commands use the configured prefix, which defaults to `!`. Set another prefix wi
 | `leaderboard` | `!leaderboard` | Shows the all-time rankings for the current server, 10 users per page, ordered by displayed power level. Use the left and right reactions to change pages. |
 | `achievements` | `!achievements` | Lists unlocked and locked achievements. |
 | `train` | `!train` | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
-| `transform` | `!transform <form>` | Changes your form. Valid forms: `normal`, `ssj`, `ssj2`, `ssj3`, `ssg`, `ssgss`. |
+| `transform` | `!transform <form>` | Changes to an unlocked racial or universal transformation; `!transform beyondgod` awakens God Ki at Tier 50. |
+| `kaioken` | `!kaioken <x2|x3|x4|x10|off>` | Activates or disables the universal Kaioken ability, which multiplies your active transformation. |
 | `revert` | `!revert` | Automatically returns you to your normal form (Beyond God if you have god ki). |
+| `race` | `!race <saiyan|human|namekian|frieza>` | Changes your race while your base power is below 1,000,000. Race changes permanently lock at that threshold. |
 | `privacy` | `!privacy optout` or `!privacy optin` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
 | `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's tier without changing their accumulated power. Only the server owner can use this command. Setting the tier below 50 removes God Ki and reverts Super Saiyan God/Super Saiyan God Super Saiyan to normal. |
 | `setpower` | `!setpower @user <power>` or `!setpower <user-id> <power>` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500; only the server owner can use it. Setting power below Tier 50 removes God Ki and reverts Super Saiyan God/Super Saiyan God Super Saiyan to normal. |
@@ -77,42 +79,90 @@ Replace `!` in these examples if you configured a different prefix. `setlevel` c
 
 For leaderboards with multiple pages, use the left and right reactions beneath the leaderboard to navigate. The controls are available to the person who ran the command for two minutes.
 
-### Transformation requirements
+### Races and transformations
 
-| Form | Unlock requirement | Training power | Training stamina cost | Stamina per eligible message |
-|---|---:|---:|---:|---:|
-| Normal (Beyond God with god ki) | 1 | 5,000 | 10 | 0 |
-| Super Saiyan | 4 | 244,000 | 500 | 1 |
-| Super Saiyan 2 | 8 | 480,000 | 1,000 | 2 |
-| Super Saiyan 3 | 16 | 1,880,000 | 4,000 | 15 |
-| Super Saiyan God | 50 | 2,025,000 | 4,500 | 5 |
-| Super Saiyan God Super Saiyan | God Tier 15 | 2,125,000 | 5,000 | 10 |
+New profiles start as Human. Existing profiles that predate race tracking and have no saved race remain Saiyan for compatibility. Use `!race <saiyan|human|namekian|frieza>` to change race before reaching 1,000,000 base power. At or above that amount, race locks permanently. Changing race resets the active race-specific form to Normal, but keeps power and universal God Ki.
 
-#### Unlocking God Ki
+Only one transformation can be active at a time. Base multipliers shown here apply before God Ki scaling.
 
-- Super Saiyan God unlocks at overall level 50 and awakens God Ki. Your current overall level becomes God Tier 1.
-- Super Saiyan God Super Saiyan unlocks at God Tier 15, regardless of your overall level.
-- God Tier is based on levels gained after awakening. For example, if you awaken at level 58, you reach God Tier 15 at overall level 72.
-- God Ki multipliers continue to scale through God Tier 15, then stop increasing.
+#### Human
 
-#### God Ki multipliers
+| Transformation | Unlock requirement | Base multiplier |
+|---|---:|---:|
+| Potential Unleashed | Tier 16 | 100× |
 
-| Form | Multiplier |
-|---|---:|
-| Beyond God (base form) | Scales from 1× at God Tier 1 to 400× at God Tier 15 |
-| Super Saiyan | Up to 50× Beyond God; capped at one-third of Super Saiyan God |
-| Super Saiyan 2 | Up to 100× Beyond God; capped at two-thirds of Super Saiyan God |
-| Super Saiyan 3 | Up to 400× Beyond God; capped at three-quarters of Super Saiyan God |
-| Super Saiyan God | Scales from 20,000× at God Tier 1 to 30,000× at God Tier 15 |
-| Super Saiyan God Super Saiyan | 50× the current Super Saiyan God multiplier (1,000,000×–1,500,000×) |
+#### Saiyan
 
-The caps keep the forms in order: Super Saiyan < Super Saiyan 2 < Super Saiyan 3 < Super Saiyan God.
+| Transformation | Unlock requirement | Base multiplier |
+|---|---:|---:|
+| Super Saiyan | Tier 4 | 50× |
+| Super Saiyan 2 | Tier 8 | 100× |
+| Super Saiyan 3 | Tier 16 | 400× |
+| Super Saiyan God | Tier 50 | 20,000×–30,000× |
+| Super Saiyan God Super Saiyan | God Tier 15 | 50× Super Saiyan God |
+
+To awaken God Ki through your first Super Saiyan God transformation, mention five other players with existing Saiyan profiles: `!transform ssg @one @two @three @four @five`.
+
+#### Namekian
+
+| Transformation | Unlock requirement | Base multiplier |
+|---|---:|---:|
+| Giant Namekian | Tier 8 | 50× |
+| Potential Unleashed | Tier 25 | 250× |
+
+#### Frieza Race
+
+| Transformation | Unlock requirement | Base multiplier |
+|---|---:|---:|
+| Final Form | Tier 8 | 50× |
+| Golden Form | Tier 25 | 400× |
+
+Kaioken is a universal ability that multiplies your active transformation:
+
+| Kaioken ability | Unlock requirement | Power multiplier |
+|---|---:|---:|
+| Kaioken x2 | Tier 4 | 2× |
+| Kaioken x3 | Tier 8 | 3× |
+| Kaioken x4 | Tier 16 | 4× |
+| Kaioken x10 | Tier 25 | 10× |
+
+Activate an unlocked level with `!kaioken x2`, `!kaioken x3`, `!kaioken x4`, or `!kaioken x10`; use `!kaioken off` to disable it. Kaioken stacks with Super Saiyan God, Super Saiyan God Super Saiyan, Potential Unleashed, and other compatible forms. It cannot be combined with Super Saiyan, Super Saiyan 2, or Super Saiyan 3 because their ki is unstable. If stamina runs out, you drop one Kaioken level at a time before dropping the active transformation.
+
+#### Universal God Ki
+
+- Any race can attempt to awaken God Ki at Tier 50 with `!transform beyondgod`. Awakening is not guaranteed: you get one attempt every 12 hours, with a 5% chance for each of your first four attempts. After four failures, the chance doubles each attempt: 10%, 20%, 40%, 80%, then 100%.
+- Saiyans can instead awaken God Ki by transforming into Super Saiyan God for the first time. This requires five other players with existing Saiyan progression profiles; mention them with the command: `!transform ssg @one @two @three @four @five`. Later SSG transformations do not require helpers.
+- Awakening sets the current overall level as God Tier 1. God Tier continues to increase with levels, while God Ki multipliers stop scaling after God Tier 15.
+- Beyond God is the shared base form for all races after awakening. God Tier scales Beyond God from 1× to 400×.
+- God Tier also scales Kaioken and each race's forms by the Beyond God multiplier. Saiyan Super Saiyan forms retain their existing caps below Super Saiyan God; Super Saiyan God and Super Saiyan God Super Saiyan remain Saiyan-only.
+- For Saiyans, Super Saiyan, Super Saiyan 2, and Super Saiyan 3 remain capped at one-third, two-thirds, and three-quarters of the current Super Saiyan God multiplier, respectively. Super Saiyan God scales from 20,000× to 30,000×, and Super Saiyan God Super Saiyan is 50× Super Saiyan God.
+- Super Saiyan God Super Saiyan unlocks at God Tier 15. For example, awakening at overall level 58 means it unlocks at overall level 72.
+
+### Training and stamina by form
+
+| Form | Training power | Training stamina cost | Stamina per eligible message |
+|---|---:|---:|---:|
+| Normal / Beyond God | 5,000 | 10 | 0 |
+| Super Saiyan | 244,000 | 500 | 1 |
+| Super Saiyan 2 | 480,000 | 1,000 | 2 |
+| Super Saiyan 3 | 1,880,000 | 4,000 | 15 |
+| Super Saiyan God | 2,025,000 | 4,500 | 5 |
+| Super Saiyan God Super Saiyan | 2,125,000 | 5,000 | 10 |
+| Kaioken ability only (x2) | 49,500 | 250 | 2 |
+| Kaioken ability only (x3) | 73,500 | 500 | 5 |
+| Kaioken ability only (x4) | 96,000 | 1,000 | 10 |
+| Kaioken ability only (x10) | 225,000 | 3,000 | 25 |
+| Potential Unleashed | 1,150,000 | 2,500 | 6 |
+| Giant Namekian / Final Form | 570,000 | 1,200 | 4 |
+| Golden Form | 2,700,000 | 6,000 | 10 |
 
 #### Stamina
 
-- Stamina is capped at 10,000 and regenerates at 2,000 per day while in base form.
-- Each eligible message drains stamina according to the transformation requirements table above. Super Saiyan 3 drains 15 per message; Super Saiyan God drains 5.
-- When stamina reaches zero, you drop one transformation level.
+- Stamina is capped at 10,000 and regenerates at 2,000 per day while in Normal/Beyond God.
+- Each eligible message drains stamina according to the training and stamina table above. When Kaioken is stacked with a transformation, its x2/x3/x4/x10 level multiplies that form's message drain and training stamina cost. For example, Potential Unleashed with Kaioken x3 drains 18 stamina per eligible message and costs 7,500 stamina to train.
+- Kaioken used by itself drains 2/5/10/25 stamina per eligible message and costs 250/500/1,000/3,000 stamina to train at x2/x3/x4/x10.
+- A stacked training cost can exceed the 10,000 stamina cap; disable Kaioken or train in a less taxing form in that case.
+- When stamina runs out, Kaioken steps down one level at a time; after it is disabled, the active transformation can also drop as stamina remains depleted.
 
 ## Data backup and restore
 

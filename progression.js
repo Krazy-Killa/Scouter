@@ -8,6 +8,35 @@ const GOD_KI_MAX_BASE_MULTIPLIER = 400;
 const GOD_KI_MAX_TIER = 15;
 const SSG_MIN_MULTIPLIER = 20000;
 const SSG_MAX_MULTIPLIER = 30000;
+const RACE_LOCK_BASE_POWER = 1000000;
+const GOD_KI_AWAKENING_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+const GOD_KI_AWAKENING_BASE_CHANCE = 0.05;
+const GOD_KI_AWAKENING_PITY_ATTEMPTS = 4;
+
+const RACES = {
+    saiyan: {
+        name: "Saiyan",
+        forms: ["ssj", "ssj2", "ssj3", "ssg", "ssgss"]
+    },
+    human: {
+        name: "Human",
+        forms: ["potential"]
+    },
+    namekian: {
+        name: "Namekian",
+        forms: ["giant", "potential"]
+    },
+    frieza: {
+        name: "Frieza Race",
+        forms: ["final", "golden"]
+    }
+};
+
+const RACE_FORM_MULTIPLIERS = {
+    human: { potential: 100 },
+    namekian: { giant: 50, potential: 250 },
+    frieza: { final: 50, golden: 400 }
+};
 
 const FORM_MULTIPLIERS = {
     normal: 1,
@@ -18,12 +47,19 @@ const FORM_MULTIPLIERS = {
     ssgss: SSG_MIN_MULTIPLIER * 50
 };
 
-const VALID_FORMS = Object.keys(FORM_MULTIPLIERS);
+const VALID_FORMS = [...new Set([
+    ...Object.keys(FORM_MULTIPLIERS),
+    ...Object.values(RACE_FORM_MULTIPLIERS).flatMap((forms) => Object.keys(forms))
+])];
+const KAIOKEN_LEVELS = [2, 3, 4, 10];
+const UNSTABLE_KAIOKEN_FORMS = ["ssj", "ssj2", "ssj3"];
+const UNIVERSAL_FORMS = ["normal"];
+const GOD_KI_FORMS = ["normal", "ssg", "ssgss"];
 
 const ACHIEVEMENTS = {
     level_10: { name: "Rising Fighter", description: "Reach Tier 10." },
     level_25: { name: "Elite Warrior", description: "Reach Tier 25." },
-    level_50: { name: "God Ki Awakened", description: "Reach Tier 50." },
+    level_50: { name: "God Ki Threshold", description: "Reach Tier 50 and unlock the ability to awaken God Ki." },
     level_64: { name: "Limit Breaker", description: "Reach Tier 64." },
     power_1m: { name: "Powerhouse", description: "Earn 1 million base power." },
     power_10m: { name: "Unstoppable", description: "Earn 10 million base power." },
@@ -34,7 +70,13 @@ const ACHIEVEMENTS = {
     form_ssj2: { name: "Ascended Saiyan", description: "Transform into Super Saiyan 2." },
     form_ssj3: { name: "Unleashed Power", description: "Transform into Super Saiyan 3." },
     form_ssg: { name: "Godly Power", description: "Transform into Super Saiyan God." },
-    form_ssgss: { name: "Beyond Godhood", description: "Transform into Super Saiyan God Super Saiyan." }
+    form_ssgss: { name: "Beyond Godhood", description: "Transform into Super Saiyan God Super Saiyan." },
+    form_kaioken: { name: "Kaio-ken", description: "Use Kaioken as an ability." },
+    form_potential: { name: "Potential Unleashed", description: "Transform into Potential Unleashed." },
+    form_giant: { name: "Giant Namekian", description: "Transform into Giant Namekian." },
+    form_final: { name: "Final Form", description: "Transform into Final Form." },
+    form_golden: { name: "Golden Form", description: "Transform into Golden Form." },
+    form_beyondgod: { name: "God Ki Awakened", description: "Awaken universal God Ki." }
 };
 
 function createDefaultUser(authorId, guildId, now = Date.now()) {
@@ -43,9 +85,14 @@ function createDefaultUser(authorId, guildId, now = Date.now()) {
         guildID: guildId,
         points: 2500,
         level: 1,
+        race: "human",
+        raceLocked: false,
         transformation: 1,
         transformationForm: "normal",
+        kaiokenLevel: 0,
         godki: 0,
+        godKiAwakeningAttempts: 0,
+        lastGodKiAwakeningAttemptAt: 0,
         stamina: MAX_STAMINA,
         staminaUpdatedAt: now,
         trainLastUsedAt: 0,
@@ -59,6 +106,25 @@ function createDefaultUser(authorId, guildId, now = Date.now()) {
 }
 
 function initializeUserProgress(user) {
+    const legacyKaiokenForms = {
+        kaioken: 10,
+        kaioken2: 2,
+        kaioken3: 3,
+        kaioken4: 4,
+        kaioken10: 10
+    };
+    if (Object.prototype.hasOwnProperty.call(legacyKaiokenForms, user.transformationForm)) {
+        user.kaiokenLevel = legacyKaiokenForms[user.transformationForm];
+        user.transformationForm = "normal";
+    }
+    if (!KAIOKEN_LEVELS.includes(user.kaiokenLevel)) user.kaiokenLevel = 0;
+    if (!Number.isSafeInteger(user.godKiAwakeningAttempts) || user.godKiAwakeningAttempts < 0) {
+        user.godKiAwakeningAttempts = 0;
+    }
+    if (!Number.isFinite(user.lastGodKiAwakeningAttemptAt)) user.lastGodKiAwakeningAttemptAt = 0;
+    if (!Object.prototype.hasOwnProperty.call(RACES, user.race)) user.race = "saiyan";
+    if (typeof user.raceLocked !== "boolean") user.raceLocked = false;
+    if (user.points - 2500 >= RACE_LOCK_BASE_POWER) user.raceLocked = true;
     if (!VALID_FORMS.includes(user.transformationForm)) {
         if (user.godki > 0) {
             const legacyGodKiForms = {
@@ -73,7 +139,11 @@ function initializeUserProgress(user) {
             user.transformationForm = VALID_FORMS.find((form) => FORM_MULTIPLIERS[form] === user.transformation) || "normal";
         }
     }
-    if (user.godki > 0 && Number.isFinite(user.level)) {
+    if (!isFormAvailableForRace(user.transformationForm, user.race)) {
+        user.transformationForm = "normal";
+    }
+    if (UNSTABLE_KAIOKEN_FORMS.includes(user.transformationForm)) user.kaiokenLevel = 0;
+    if (Number.isFinite(user.level)) {
         setTransformation(user, user.transformationForm);
     }
     if (!Number.isFinite(user.lastXpAt)) user.lastXpAt = 0;
@@ -105,9 +175,27 @@ function hasReachedGodTier(user, requiredTier) {
     return user.godki > 0 && getGodTierLevel(user) >= requiredTier;
 }
 
-function getTransformationMultiplier(form, godki = 0, godTierLevel = 1) {
-    if (!Object.prototype.hasOwnProperty.call(FORM_MULTIPLIERS, form)) {
+function getGodKiAwakeningChance(failedAttempts) {
+    if (!Number.isSafeInteger(failedAttempts) || failedAttempts < 0) {
+        throw new RangeError("Failed God Ki awakening attempts must be a non-negative safe integer.");
+    }
+    const pitySteps = Math.max(0, failedAttempts - GOD_KI_AWAKENING_PITY_ATTEMPTS + 1);
+    return Math.min(1, GOD_KI_AWAKENING_BASE_CHANCE * (2 ** pitySteps));
+}
+
+function isFormAvailableForRace(form, race = "saiyan") {
+    if (!Object.prototype.hasOwnProperty.call(RACES, race)) return false;
+    if (UNIVERSAL_FORMS.includes(form)) return true;
+    if (GOD_KI_FORMS.includes(form)) return race === "saiyan";
+    return RACES[race].forms.includes(form);
+}
+
+function getTransformationMultiplier(form, godki = 0, godTierLevel = 1, race = "saiyan") {
+    if (!VALID_FORMS.includes(form)) {
         throw new Error(`Unknown transformation form: ${form}`);
+    }
+    if (!isFormAvailableForRace(form, race)) {
+        throw new Error(`Transformation ${form} is not available to race ${race}.`);
     }
     const godKiBase = getGodKiBaseMultiplier(godTierLevel);
     const ssgMultiplier = getSsgMultiplier(godTierLevel);
@@ -121,12 +209,59 @@ function getTransformationMultiplier(form, godki = 0, godTierLevel = 1) {
             Math.floor(ssgMultiplier * ssgShare)
         );
     }
+    const raceFormMultiplier = RACE_FORM_MULTIPLIERS[race]?.[form];
+    if (raceFormMultiplier !== undefined) {
+        return godki > 0 ? godKiBase * raceFormMultiplier : raceFormMultiplier;
+    }
     return FORM_MULTIPLIERS[form];
 }
 
 function setTransformation(user, form) {
+    const race = Object.prototype.hasOwnProperty.call(RACES, user.race) ? user.race : "saiyan";
+    if (!isFormAvailableForRace(form, race)) {
+        throw new Error(`Transformation ${form} is not available to race ${race}.`);
+    }
     user.transformationForm = form;
-    user.transformation = getTransformationMultiplier(form, user.godki, getGodTierLevel(user) || 1);
+    if (UNSTABLE_KAIOKEN_FORMS.includes(form)) user.kaiokenLevel = 0;
+    user.transformation = getTransformationMultiplier(form, user.godki, getGodTierLevel(user) || 1, race)
+        * getKaiokenMultiplier(user.kaiokenLevel);
+}
+
+function getKaiokenMultiplier(level) {
+    if (!KAIOKEN_LEVELS.includes(level)) return 1;
+    return level;
+}
+
+function setKaiokenLevel(user, level) {
+    if (level !== 0 && !KAIOKEN_LEVELS.includes(level)) {
+        throw new RangeError(`Unknown Kaioken level: ${level}`);
+    }
+    if (level > 0 && UNSTABLE_KAIOKEN_FORMS.includes(user.transformationForm)) {
+        throw new Error(`Kaioken is not compatible with ${user.transformationForm} due to Ki instability.`);
+    }
+    user.kaiokenLevel = level;
+    const race = Object.prototype.hasOwnProperty.call(RACES, user.race) ? user.race : "saiyan";
+    user.transformation = getTransformationMultiplier(
+        user.transformationForm || "normal",
+        user.godki,
+        getGodTierLevel(user) || 1,
+        race
+    ) * getKaiokenMultiplier(level);
+}
+
+function changeRace(user, race) {
+    if (!Object.prototype.hasOwnProperty.call(RACES, race)) {
+        throw new RangeError(`Unknown race: ${race}`);
+    }
+    if (user.race === race) return false;
+    if (user.raceLocked || user.points - 2500 >= RACE_LOCK_BASE_POWER) {
+        user.raceLocked = true;
+        return false;
+    }
+    user.race = race;
+    user.transformationForm = "normal";
+    setTransformation(user, "normal");
+    return true;
 }
 
 function getXpRequiredForLevel(level) {
@@ -135,6 +270,7 @@ function getXpRequiredForLevel(level) {
 
 function addExperience(user, amount) {
     user.points += amount;
+    if (user.points - 2500 >= RACE_LOCK_BASE_POWER) user.raceLocked = true;
     let levelsGained = 0;
 
     while (user.points - 2500 >= getXpRequiredForLevel(user.level)) {
@@ -176,6 +312,7 @@ function setBasePower(user, power) {
     }
 
     user.points = power;
+    if (user.points - 2500 >= RACE_LOCK_BASE_POWER) user.raceLocked = true;
     user.level = 1;
     let unspentPower = user.points - 2500;
     while (unspentPower >= getXpRequiredForLevel(user.level)) {
@@ -239,28 +376,37 @@ function optInUser(privacyStore, key) {
 module.exports = {
     ACHIEVEMENTS,
     MAX_STAMINA,
+    RACES,
+    RACE_LOCK_BASE_POWER,
     XP_COOLDOWN_MS,
     GOD_KI_BASE_MULTIPLIER,
+    GOD_KI_AWAKENING_BASE_CHANCE,
+    GOD_KI_AWAKENING_COOLDOWN_MS,
     GOD_KI_MAX_BASE_MULTIPLIER,
     GOD_KI_MAX_TIER,
     REPEATED_MESSAGE_WINDOW_MS,
     addExperience,
     canEarnMessageXp,
+    changeRace,
     createDefaultUser,
     getGodKiBaseMultiplier,
+    getGodKiAwakeningChance,
     getGodTierLevel,
+    getKaiokenMultiplier,
     hasReachedGodTier,
     getProgressAchievementIds,
     getSsgMultiplier,
     getTransformationMultiplier,
     getXpRequiredForLevel,
     initializeUserProgress,
+    isFormAvailableForRace,
     normalizeMessage,
     optInUser,
     optOutUser,
     recordMessageXp,
     recordTrainingDay,
     setBasePower,
+    setKaiokenLevel,
     setUserLevel,
     setTransformation
 };

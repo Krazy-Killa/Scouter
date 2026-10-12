@@ -143,10 +143,38 @@ function initializeUserProgress(user) {
 }
 
 function waitAndDelete(message, ms) {
-    if (!message || !message.deletable) return;
-    setTimeout(() => {
-        message.delete().catch(() => {});
+    if (!message) return;
+    setTimeout(async () => {
+        try {
+            await message.delete();
+        } catch (error) {
+            if (error.code !== 10008) {
+                console.error(`Failed to delete message ${message.id}:`, error);
+            }
+        }
     }, ms);
+}
+
+async function sendTemporary(channel, content, deleteAfterMs, context) {
+    try {
+        const sentMessage = await channel.send(content);
+        waitAndDelete(sentMessage, deleteAfterMs);
+        return sentMessage;
+    } catch (error) {
+        console.error(`Failed to send ${context}:`, error);
+        return null;
+    }
+}
+
+async function replyTemporary(message, content, deleteAfterMs, context) {
+    try {
+        const reply = await message.reply(content);
+        waitAndDelete(reply, deleteAfterMs);
+        return reply;
+    } catch (error) {
+        console.error(`Failed to send ${context}:`, error);
+        return null;
+    }
 }
 
 function getXpRequiredForLevel(level) {
@@ -219,7 +247,7 @@ function sendLevelUp(message, user, levelsGained) {
         )
         .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
-    message.channel.send({ embeds: [levelUpEmbed] }).then((sent) => waitAndDelete(sent, 30000));
+    sendTemporary(message.channel, { embeds: [levelUpEmbed] }, 30000, "level-up notice");
 }
 
 function awardAchievements(message, user, achievementIds) {
@@ -236,8 +264,7 @@ function awardAchievements(message, user, achievementIds) {
         .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
         .setColor("#FFD700");
 
-    message.channel.send({ embeds: [achievementEmbed] })
-        .catch((error) => console.error(`Failed to send achievement notice for user ${user.userID}:`, error));
+    sendTemporary(message.channel, { embeds: [achievementEmbed] }, 30000, `achievement notice for user ${user.userID}`);
 }
 
 function getProgressAchievementIds(user) {
@@ -291,9 +318,7 @@ function sendNewUserNotice(guildId, channel, user) {
                 { name: "Total users tracked", value: String(totalTracked), inline: true }
             );
 
-        state.channel.send({ embeds: [newUserEmbed] })
-            .then((sent) => waitAndDelete(sent, 5000))
-            .catch((error) => console.error(`Failed to send new-user notice for guild ${guildId}:`, error));
+        sendTemporary(state.channel, { embeds: [newUserEmbed] }, 5000, `new-user notice for guild ${guildId}`);
     };
 
     const timeUntilNextNotice = NEW_USER_NOTICE_INTERVAL_MS - (Date.now() - state.lastSentAt);
@@ -329,6 +354,9 @@ client.on("messageCreate", async (message) => {
     const isCommand = message.content.startsWith(config.prefix);
     const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
     const command = args.length > 0 ? args.shift().toLowerCase() : null;
+    if (["help", "info", "leaderboard", "achievements", "train", "transform", "setlevel"].includes(command)) {
+        waitAndDelete(message, 1500);
+    }
 
     if (!isCommand) {
         if (message.content.length < config.minsize) return;
@@ -369,7 +397,6 @@ client.on("messageCreate", async (message) => {
 
     // Read-only commands report the user's current progression and guild rankings.
     if (command === "help") {
-        waitAndDelete(message, 1500);
         const help = new EmbedBuilder()
             .setTitle("Command List")
             .addFields(
@@ -383,12 +410,11 @@ client.on("messageCreate", async (message) => {
             .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
         client.points.set(key, user);
-        message.channel.send({ embeds: [help] }).then((sent) => waitAndDelete(sent, 30000));
+        sendTemporary(message.channel, { embeds: [help] }, 30000, "help response");
         return;
     }
 
     if (command === "info") {
-        waitAndDelete(message, 1500);
         client.points.set(key, user);
 
         const infoEmbed = new EmbedBuilder()
@@ -409,7 +435,7 @@ client.on("messageCreate", async (message) => {
             infoEmbed.setFooter({ text: `${numeral(levelInfo.difference).format("0,0")} additional power needed to reach the next tier!`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
         }
 
-        message.channel.send({ embeds: [infoEmbed] }).then((sent) => waitAndDelete(sent, 12500));
+        sendTemporary(message.channel, { embeds: [infoEmbed] }, 12500, "info response");
         return;
     }
 
@@ -424,12 +450,11 @@ client.on("messageCreate", async (message) => {
             .setColor("#FFD700")
             .setFooter({ text: `${user.achievements.length} / ${Object.keys(ACHIEVEMENTS).length} unlocked` });
 
-        message.channel.send({ embeds: [achievementEmbed] }).then((sent) => waitAndDelete(sent, 30000));
+        sendTemporary(message.channel, { embeds: [achievementEmbed] }, 30000, "achievements response");
         return;
     }
 
     if (command === "leaderboard") {
-        waitAndDelete(message, 1500);
         client.points.set(key, user);
 
         const filtered = client.points.filterArray((p) => p.guildID === message.guild.id);
@@ -467,7 +492,13 @@ client.on("messageCreate", async (message) => {
                 .setColor(0x00ae86);
         };
 
-        const leaderboardMessage = await message.channel.send({ embeds: [createLeaderboardEmbed(1)] });
+        const leaderboardMessage = await sendTemporary(
+            message.channel,
+            { embeds: [createLeaderboardEmbed(1)] },
+            totalPages > 1 ? 120000 : 30000,
+            "leaderboard"
+        );
+        if (!leaderboardMessage) return;
         if (totalPages > 1) {
             const previousPageEmoji = "⬅️";
             const nextPageEmoji = "➡️";
@@ -476,7 +507,12 @@ client.on("messageCreate", async (message) => {
                 await leaderboardMessage.react(nextPageEmoji);
             } catch (error) {
                 console.error("Failed to add leaderboard pagination reactions:", error);
-                await leaderboardMessage.reply("I couldn't add the page controls. Please check that I have Add Reactions and Read Message History permissions.");
+                await replyTemporary(
+                    leaderboardMessage,
+                    "I couldn't add the page controls. Please check that I have Add Reactions and Read Message History permissions.",
+                    10000,
+                    "leaderboard pagination error"
+                );
                 return;
             }
 
@@ -509,7 +545,6 @@ client.on("messageCreate", async (message) => {
             });
         }
 
-        waitAndDelete(leaderboardMessage, totalPages > 1 ? 120000 : 30000);
         return;
     }
 
@@ -518,13 +553,13 @@ client.on("messageCreate", async (message) => {
         const cooldownRemaining = TRAIN_COOLDOWN_MS - (rightNow - user.trainLastUsedAt);
         if (cooldownRemaining > 0) {
             const hoursRemaining = Math.ceil(cooldownRemaining / (60 * 60 * 1000));
-            return message.reply(`You're exhausted from training. Try again in about ${hoursRemaining} hour(s).`);
+            return replyTemporary(message, `You're exhausted from training. Try again in about ${hoursRemaining} hour(s).`, 10000, "training cooldown response");
         }
 
         const form = getCurrentForm(user);
         const rule = TRANSFORM_RULES[form];
         if (user.stamina < rule.trainingCost) {
-            return message.reply(`Not enough stamina to train in ${form.toUpperCase()}. You need ${numeral(rule.trainingCost).format("0,0")} stamina; you have ${numeral(Math.floor(user.stamina)).format("0,0")}.`);
+            return replyTemporary(message, `Not enough stamina to train in ${form.toUpperCase()}. You need ${numeral(rule.trainingCost).format("0,0")} stamina; you have ${numeral(Math.floor(user.stamina)).format("0,0")}.`, 10000, "training stamina response");
         }
 
         const rawPower = BASE_TRAINING_POWER * rule.trainingMultiplier;
@@ -556,7 +591,7 @@ client.on("messageCreate", async (message) => {
             )
             .setFooter({ text: "Training can be used once every 24 hours.", iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
-        message.channel.send({ embeds: [trainingEmbed] });
+        sendTemporary(message.channel, { embeds: [trainingEmbed] }, 30000, "training result");
         sendLevelUp(message, user, levelsGained);
         return;
     }
@@ -564,7 +599,6 @@ client.on("messageCreate", async (message) => {
     // Transformation changes require an unlocked form and available stamina.
     if (command === "transform") {
         const form = args.length > 0 ? args[0].toLowerCase() : null;
-        waitAndDelete(message, 2000);
 
         if (!form || !Object.prototype.hasOwnProperty.call(TRANSFORM_RULES, form)) {
             const invalidTransform = new EmbedBuilder()
@@ -576,7 +610,7 @@ client.on("messageCreate", async (message) => {
                 )
                 .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
-            message.channel.send({ embeds: [invalidTransform] }).then((sent) => waitAndDelete(sent, 10000));
+            sendTemporary(message.channel, { embeds: [invalidTransform] }, 10000, "invalid transformation response");
             return;
         }
 
@@ -588,7 +622,7 @@ client.on("messageCreate", async (message) => {
                 .setColor("#FF0000")
                 .addFields({ name: "You've ascended to god tier.", value: "These transformations are no longer relevant to you anymore." });
 
-            message.channel.send({ embeds: [godTierWarning] }).then((sent) => waitAndDelete(sent, 10000));
+            sendTemporary(message.channel, { embeds: [godTierWarning] }, 10000, "god-tier transformation response");
             return;
         }
 
@@ -599,12 +633,12 @@ client.on("messageCreate", async (message) => {
                 .setColor("#FF0000")
                 .addFields({ name: "Level too low!", value: "Additional power required to transform." });
 
-            message.channel.send({ embeds: [lowLevelWarning] }).then((sent) => waitAndDelete(sent, 10000));
+            sendTemporary(message.channel, { embeds: [lowLevelWarning] }, 10000, "level requirement response");
             return;
         }
 
         if (form !== "normal" && user.stamina <= 0) {
-            return message.reply("You're out of stamina and need to recover before transforming.");
+            return replyTemporary(message, "You're out of stamina and need to recover before transforming.", 10000, "transformation stamina response");
         }
 
         if (form === "normal") {
@@ -632,7 +666,7 @@ client.on("messageCreate", async (message) => {
                 { name: "Stamina", value: `${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true }
             );
 
-        message.channel.send({ embeds: [transformEmbed] }).then((sent) => waitAndDelete(sent, 10000));
+        sendTemporary(message.channel, { embeds: [transformEmbed] }, 10000, "transformation result");
         return;
     }
 
@@ -640,20 +674,20 @@ client.on("messageCreate", async (message) => {
     if (command === "setlevel") {
         const guildOwner = message.guild.ownerId ?? null;
         if (message.author.id !== guildOwner) {
-            return message.reply("You're not the boss of me, you can't do that!");
+            return replyTemporary(message, "You're not the boss of me, you can't do that!", 10000, "setlevel permission response");
         }
 
         const userMention = message.mentions.users.first() || client.users.cache.get(args[0]);
-        if (!userMention) return message.reply("You must mention someone or give their ID!");
+        if (!userMention) return replyTemporary(message, "You must mention someone or give their ID!", 10000, "setlevel user response");
 
         const setLevel = Number.parseInt(args[1], 10);
-        if (!Number.isInteger(setLevel) || setLevel < 1) return message.reply("Enter a level of 1 or higher.");
+        if (!Number.isInteger(setLevel) || setLevel < 1) return replyTemporary(message, "Enter a level of 1 or higher.", 10000, "setlevel validation response");
 
         const targetKey = `${message.guild.id}-${userMention.id}`;
         const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
         targetUser.level = setLevel;
         client.points.set(targetKey, targetUser);
-        message.channel.send(`${userMention.tag} has been set to ${setLevel}.`);
+        sendTemporary(message.channel, `${userMention.tag} has been set to ${setLevel}.`, 10000, "setlevel confirmation");
         return;
     }
 });

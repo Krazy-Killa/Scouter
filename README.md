@@ -46,7 +46,27 @@ Replace `!` in these examples if you configured a different prefix. The `setleve
 
 For leaderboards with multiple pages, use the left and right reactions beneath the leaderboard to navigate. The controls are available to the person who ran the command for two minutes.
 
-The bot needs the **Add Reactions**, **Read Message History**, and **Manage Messages** permissions in the channel to use and clean up the leaderboard reaction controls.
+### Discord permissions and intent
+
+Grant the bot these channel permissions:
+
+**Required for normal bot operation**
+
+- **View Channel**
+- **Send Messages**
+- **Embed Links** — commands and progression notices use embeds.
+
+**Required for automatic cleanup**
+
+- **Manage Messages** — allows the bot to delete users' command messages. Without it, the bot can still run commands and delete its own messages, but command messages will remain. The bot logs deletion failures to its console.
+
+**Required for reaction-based leaderboard pagination**
+
+- **Add Reactions**
+- **Read Message History**
+- **Manage Messages** — used to remove the requesting user's reaction after a page change.
+
+The bot also needs the **Message Content Intent** enabled under **Developer Portal → Bot → Privileged Gateway Intents** so it can read command text and award progression for chat messages.
 
 ### Transformation requirements
 

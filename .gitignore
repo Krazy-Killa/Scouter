@@ -1,10 +1,9 @@
+# Local credentials and configuration
+/.env
+/.env.*
+!/.env.example
+/config.json
 
-bot.js
-auth.json
-config.json
-.env
-.env.*
-!.env.example
-data/*
-node_modules/*
-points.json
+# Runtime data and installed dependencies
+/data/
+/node_modules/

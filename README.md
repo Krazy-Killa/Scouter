@@ -78,20 +78,20 @@ For leaderboards with multiple pages, use the left and right reactions beneath t
 
 ### Transformation requirements
 
-| Form | Minimum level | Training power | Training stamina cost | Stamina per eligible message |
+| Form | Unlock requirement | Training power | Training stamina cost | Stamina per eligible message |
 |---|---:|---:|---:|---:|
 | Normal (Beyond God with god ki) | 1 | 5,000 | 10 | 0 |
 | Super Saiyan | 4 | 244,000 | 500 | 1 |
 | Super Saiyan 2 | 8 | 480,000 | 1,000 | 2 |
 | Super Saiyan 3 | 16 | 1,880,000 | 4,000 | 15 |
 | Super Saiyan God | 50 | 2,025,000 | 4,500 | 5 |
-| Super Saiyan God Super Saiyan | 64 | 2,125,000 | 5,000 | 10 |
+| Super Saiyan God Super Saiyan | God Tier 15 | 2,125,000 | 5,000 | 10 |
 
 #### Unlocking God Ki
 
-- Super Saiyan God unlocks at overall level 50; Super Saiyan God Super Saiyan unlocks at level 64.
-- Transforming into either form awakens God Ki. Your current overall level becomes God Tier 1.
-- God Tier is based on levels gained after awakening. For example, if you awaken at level 50, level 64 is God Tier 15.
+- Super Saiyan God unlocks at overall level 50 and awakens God Ki. Your current overall level becomes God Tier 1.
+- Super Saiyan God Super Saiyan unlocks at God Tier 15, regardless of your overall level.
+- God Tier is based on levels gained after awakening. For example, if you awaken at level 58, you reach God Tier 15 at overall level 72.
 - God Ki multipliers continue to scale through God Tier 15, then stop increasing.
 
 #### God Ki multipliers
@@ -149,10 +149,10 @@ Use `!privacy optout` to stop progression tracking in the current server and del
 
 - Eligible messages grant 400–660 progression power, independent of transformation. The base random award is 400–600; messages earn up to 10% extra based on non-whitespace length, capped at 200 characters. Transformation multipliers remain in effect for displayed power level.
 - To reduce chat spam, only one message per user can earn power every 60 seconds. Repeating the same normalized message within 10 minutes of its last power award does not earn power.
-- The XP required to advance from level `L` is cumulative: `5,000 × L + 3,000 × (L × (L + 1) × (2L + 1) / 6)`. Super Saiyan God Super Saiyan remains unlocked at level 64.
+- The XP required to advance from level `L` is cumulative: `5,000 × L + 3,000 × (L × (L + 1) × (2L + 1) / 6)`. Super Saiyan God Super Saiyan requires God Tier 15; the overall level where it unlocks depends on when God Ki was awakened.
 - Messages shorter than the configured minimum size and messages beginning with the command prefix do not grant progression power.
 - Training rewards use form-specific multipliers and penalties, separate from the lore-based displayed power multipliers. Base-form training is the most stamina-efficient option.
 - A user's progression record is created the first time they chat in a server. New-user notices are batched per server and sent no more than once per minute, showing both the number added in that update and the total users tracked.
 - Achievements are announced when earned and can be reviewed with `!achievements`. They include tier and power milestones, first-time transformations, a first training session, and training on seven consecutive UTC calendar days.
 
-At 100 eligible messages per day, the current numbers estimate roughly nine months to level 64 for an active user who trains regularly and uses higher forms, then returns to base to recover stamina. Actual timing varies with message eligibility, training use, and stamina management.
+At 100 eligible messages per day, the current numbers estimate roughly nine months to reach overall level 64 for an active user who starts at level 1, trains regularly, and uses higher forms before returning to base to recover stamina. Super Saiyan God Super Saiyan unlock timing depends on when the user awakens God Ki. Actual timing varies with message eligibility, training use, and stamina management.

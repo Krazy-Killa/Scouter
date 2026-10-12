@@ -8,6 +8,7 @@ const {
     createDefaultUser,
     getGodKiBaseMultiplier,
     getGodTierLevel,
+    hasReachedGodTier,
     getSsgMultiplier,
     getProgressAchievementIds,
     getTransformationMultiplier,
@@ -194,14 +195,32 @@ test("updates the active god-ki multiplier when the user gains a God Tier", () =
     assert.equal(user.transformation, 20714);
 });
 
-test("maps overall level 50 to God Tier 1 and level 64 to God Tier 15", () => {
+test("maps overall levels relative to each user's God Ki awakening level", () => {
     const user = createDefaultUser("user", "guild", 0);
-    user.godki = 50;
-    user.level = 50;
+    user.godki = 58;
+    user.level = 58;
     assert.equal(getGodTierLevel(user), 1);
+    assert.equal(hasReachedGodTier(user, 15), false);
 
-    user.level = 64;
+    user.level = 71;
+    assert.equal(getGodTierLevel(user), 14);
+    assert.equal(hasReachedGodTier(user, 15), false);
+
+    user.level = 72;
     assert.equal(getGodTierLevel(user), 15);
+    assert.equal(hasReachedGodTier(user, 15), true);
+
+    user.level = 100;
+    assert.equal(getGodTierLevel(user), 43);
+    assert.equal(hasReachedGodTier(user, 15), true);
+});
+
+test("God Tier requirements cannot be met before God Ki is awakened", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.level = 100;
+
+    assert.equal(getGodTierLevel(user), 0);
+    assert.equal(hasReachedGodTier(user, 15), false);
 });
 
 test("preserves transformation identity for all god-ki forms", () => {

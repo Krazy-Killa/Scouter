@@ -12,6 +12,7 @@ const {
     canEarnMessageXp,
     createDefaultUser,
     getGodTierLevel,
+    hasReachedGodTier,
     getProgressAchievementIds,
     getTransformationMultiplier,
     getXpRequiredForLevel,
@@ -79,7 +80,7 @@ const TRANSFORM_RULES = {
     ssj2: { minLevel: 8, trainingMultiplier: 100, trainingPenalty: 0.04, trainingCost: 1000, messageDrain: 2 },
     ssj3: { minLevel: 16, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 15 },
     ssg: { minLevel: 50, setGodKi: true, trainingMultiplier: 450, trainingPenalty: 0.1, trainingCost: 4500, messageDrain: 5 },
-    ssgss: { minLevel: 64, setGodKi: true, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 }
+    ssgss: { minGodTier: 15, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 }
 };
 
 // Presentation helpers for the transformation multiplier.
@@ -506,7 +507,7 @@ client.on("messageCreate", async (message) => {
                 { name: `${config.prefix}leaderboard`, value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
                 { name: `${config.prefix}achievements`, value: "Shows your unlocked achievements and progress.", inline: true },
                 { name: `${config.prefix}privacy`, value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
-                { name: `${config.prefix}transform`, value: "Changes your form, which drains stamina as you chat." },
+                { name: `${config.prefix}transform`, value: "Changes your form, which drains stamina as you chat. Super Saiyan God unlocks at Tier 50; Super Saiyan God Super Saiyan requires God Tier 15 after awakening God Ki." },
                 { name: `${config.prefix}revert`, value: "Automatically reverts you to your normal form." },
                 { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." },
                 { name: `${config.prefix}setlevel @user <level>`, value: "Set a member's tier (server owner only)." },
@@ -818,12 +819,20 @@ client.on("messageCreate", async (message) => {
         }
 
         const rule = TRANSFORM_RULES[form];
-        if (user.level < rule.minLevel) {
+        const meetsRequirement = rule.minGodTier
+            ? hasReachedGodTier(user, rule.minGodTier)
+            : user.level >= rule.minLevel;
+        if (!meetsRequirement) {
             const lowLevelWarning = new EmbedBuilder()
                 .setAuthor({ name: `${transformLabel(getCurrentForm(user), user.godki)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setColor("#FF0000")
-                .addFields({ name: "Level too low!", value: "Additional power required to transform." });
+                .addFields({
+                    name: rule.minGodTier ? "God Tier too low!" : "Level too low!",
+                    value: rule.minGodTier
+                        ? `Awaken God Ki with Super Saiyan God, then reach God Tier ${rule.minGodTier} to unlock Super Saiyan God Super Saiyan.`
+                        : "Additional power required to transform."
+                });
 
             sendTemporary(message.channel, { embeds: [lowLevelWarning] }, 10000, "level requirement response");
             return;

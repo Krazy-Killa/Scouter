@@ -101,6 +101,10 @@ function getGodTierLevel(user) {
     return user.godki > 0 ? Math.max(1, user.level - user.godki + 1) : 0;
 }
 
+function hasReachedGodTier(user, requiredTier) {
+    return user.godki > 0 && getGodTierLevel(user) >= requiredTier;
+}
+
 function getTransformationMultiplier(form, godki = 0, godTierLevel = 1) {
     if (!Object.prototype.hasOwnProperty.call(FORM_MULTIPLIERS, form)) {
         throw new Error(`Unknown transformation form: ${form}`);
@@ -245,6 +249,7 @@ module.exports = {
     createDefaultUser,
     getGodKiBaseMultiplier,
     getGodTierLevel,
+    hasReachedGodTier,
     getProgressAchievementIds,
     getSsgMultiplier,
     getTransformationMultiplier,

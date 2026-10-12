@@ -6,14 +6,18 @@ const {
     addExperience,
     canEarnMessageXp,
     createDefaultUser,
+    getGodKiBaseMultiplier,
+    getSsgMultiplier,
     getProgressAchievementIds,
+    getTransformationMultiplier,
     getXpRequiredForLevel,
     initializeUserProgress,
     normalizeMessage,
     optInUser,
     optOutUser,
     recordMessageXp,
-    recordTrainingDay
+    recordTrainingDay,
+    setTransformation
 } = require("../progression");
 
 test("normalizes message case and whitespace before duplicate checks", () => {
@@ -78,6 +82,64 @@ test("initializes new progression fields on existing records", () => {
     assert.deepEqual(legacyUser.achievements, []);
     assert.equal(legacyUser.trainingStreakDays, 0);
     assert.equal(legacyUser.lastTrainingDay, null);
+});
+
+test("scales Beyond God and SSG multipliers linearly across God Tier 1 through 64", () => {
+    assert.equal(getGodKiBaseMultiplier(1), 1);
+    assert.equal(getGodKiBaseMultiplier(32), 197);
+    assert.equal(getGodKiBaseMultiplier(64), 400);
+    assert.equal(getGodKiBaseMultiplier(100), 400);
+
+    assert.equal(getSsgMultiplier(1), 20000);
+    assert.equal(getSsgMultiplier(32), 24920);
+    assert.equal(getSsgMultiplier(64), 30000);
+    assert.equal(getSsgMultiplier(100), 30000);
+});
+
+test("uses tier-scaled multipliers for all god-ki forms", () => {
+    assert.equal(getTransformationMultiplier("normal", 1, 1), 1);
+    assert.equal(getTransformationMultiplier("ssj", 1, 1), 50);
+    assert.equal(getTransformationMultiplier("ssj2", 1, 64), 40000);
+    assert.equal(getTransformationMultiplier("ssj3", 1, 64), 160000);
+    assert.equal(getTransformationMultiplier("ssg", 1, 64), 30000);
+    assert.equal(getTransformationMultiplier("ssgss", 1, 64), 1500000);
+    assert.equal(
+        getTransformationMultiplier("ssgss", 1, 32),
+        getTransformationMultiplier("ssg", 1, 32) * 50
+    );
+});
+
+test("updates the active god-ki multiplier when the user gains a God Tier", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.godki = 1;
+    setTransformation(user, "ssg");
+
+    assert.equal(user.transformation, 20000);
+    assert.equal(addExperience(user, getXpRequiredForLevel(1)), 1);
+    assert.equal(user.level, 2);
+    assert.equal(user.transformation, 20158);
+});
+
+test("preserves transformation identity for all god-ki forms", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.godki = 1;
+
+    setTransformation(user, "ssj2");
+    assert.equal(user.transformation, 100);
+    assert.equal(user.transformationForm, "ssj2");
+
+    setTransformation(user, "ssgss");
+    assert.equal(user.transformation, 1000000);
+    assert.equal(user.transformationForm, "ssgss");
+});
+
+test("migrates existing god-ki records to their matching form name", () => {
+    const legacyUser = { userID: "user", guildID: "guild", level: 64, godki: 64, transformation: 8000000 };
+
+    initializeUserProgress(legacyUser);
+
+    assert.equal(legacyUser.transformationForm, "ssgss");
+    assert.equal(legacyUser.transformation, 1000000);
 });
 
 test("privacy opt-out deletes progression and opt-in clears the opt-out marker", () => {

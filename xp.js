@@ -9,14 +9,17 @@ const {
     addExperience,
     canEarnMessageXp,
     createDefaultUser,
+    getGodTierLevel,
     getProgressAchievementIds,
+    getTransformationMultiplier,
     getXpRequiredForLevel,
     initializeUserProgress,
     normalizeMessage,
     optInUser,
     optOutUser,
     recordMessageXp,
-    recordTrainingDay
+    recordTrainingDay,
+    setTransformation
 } = require("./progression");
 
 // Local config.json is optional; environment variables take precedence.
@@ -30,7 +33,7 @@ try {
 const config = {
     token: process.env.DISCORD_TOKEN || fileConfig.token,
     prefix: process.env.DISCORD_PREFIX || fileConfig.prefix || "!",
-    version: process.env.APP_VERSION || fileConfig.version || "0.3.0",
+    version: process.env.APP_VERSION || fileConfig.version || "0.4.0",
     author: process.env.APP_AUTHOR || fileConfig.author || "Krazy-Killa",
     icon: process.env.APP_ICON || fileConfig.icon || "",
     minsize: Number(process.env.MIN_MSG_SIZE ?? fileConfig.minsize ?? 2)
@@ -66,40 +69,24 @@ const newUserNoticeState = new Map();
 
 // One rule table drives transformation access, training rewards, and stamina usage.
 const TRANSFORM_RULES = {
-    normal: { target: 1, minLevel: 1, allowGod: true, trainingMultiplier: 1, trainingPenalty: 0, trainingCost: 10, messageDrain: 0 },
-    ssj: { target: 50, minLevel: 4, allowGod: false, trainingMultiplier: 50, trainingPenalty: 0.024, trainingCost: 500, messageDrain: 1 },
-    ssj2: { target: 100, minLevel: 8, allowGod: false, trainingMultiplier: 100, trainingPenalty: 0.04, trainingCost: 1000, messageDrain: 2 },
-    ssj3: { target: 400, minLevel: 16, allowGod: false, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 4 },
-    ssg: { target: 160000, minLevel: 50, allowGod: true, setGodKi: true, trainingMultiplier: 450, trainingPenalty: 0.1, trainingCost: 4500, messageDrain: 5 },
-    ssgss: { target: 8000000, minLevel: 64, allowGod: true, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 }
-};
-
-const TRANSFORMATION_FALLBACKS = {
-    50: 1,
-    100: 50,
-    400: 100,
-    160000: 80000,
-    8000000: 160000
+    normal: { minLevel: 1, trainingMultiplier: 1, trainingPenalty: 0, trainingCost: 10, messageDrain: 0 },
+    ssj: { minLevel: 4, trainingMultiplier: 50, trainingPenalty: 0.024, trainingCost: 500, messageDrain: 1 },
+    ssj2: { minLevel: 8, trainingMultiplier: 100, trainingPenalty: 0.04, trainingCost: 1000, messageDrain: 2 },
+    ssj3: { minLevel: 16, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 4 },
+    ssg: { minLevel: 50, setGodKi: true, trainingMultiplier: 450, trainingPenalty: 0.1, trainingCost: 4500, messageDrain: 5 },
+    ssgss: { minLevel: 64, setGodKi: true, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 }
 };
 
 // Presentation helpers for the transformation multiplier.
-const borderColor = (x) => {
-    if (x === 1 || x === 80000) return "#FF0000";
-    if (x === 50 || x === 100 || x === 400) return "#FFFF00";
-    if (x === 160000) return "#FF2400";
-    if (x === 8000000) return "#00FFFF";
+const borderColor = (form) => {
+    if (form === "normal") return "#FF0000";
+    if (["ssj", "ssj2", "ssj3"].includes(form)) return "#FFFF00";
+    if (form === "ssg") return "#FF2400";
+    if (form === "ssgss") return "#00FFFF";
     return "#08ff00";
 };
 
-const transformLabel = (x) => {
-    if (x === 1 || x === 80000) return "";
-    if (x === 50) return "SSJ";
-    if (x === 100) return "SSJ2";
-    if (x === 400) return "SSJ3";
-    if (x === 160000) return "SSG";
-    if (x === 8000000) return "SSGSS";
-    return "";
-};
+const transformLabel = (form) => form === "normal" ? "" : form.toUpperCase();
 
 function formatPowerLevel(power) {
     return power < 100000
@@ -164,16 +151,22 @@ function recoverStamina(user, now) {
 }
 
 function getBaseTransformation(user) {
-    return user.godki > 0 ? 80000 : 1;
+    return getTransformationMultiplier("normal", user.godki, getGodTierLevel(user) || 1);
 }
 
 function dropTransformation(user) {
-    user.transformation = TRANSFORMATION_FALLBACKS[user.transformation] || getBaseTransformation(user);
+    const fallbackForm = {
+        ssj: "normal",
+        ssj2: "ssj",
+        ssj3: "ssj2",
+        ssg: "normal",
+        ssgss: "ssg"
+    }[getCurrentForm(user)] || "normal";
+    setTransformation(user, fallbackForm);
 }
 
 function getCurrentForm(user) {
-    if (user.godki > 0 && user.transformation === 80000) return "normal";
-    return Object.keys(TRANSFORM_RULES).find((form) => TRANSFORM_RULES[form].target === user.transformation) || "normal";
+    return user.transformationForm || "normal";
 }
 
 // Send one summary even if a large reward crosses several levels.
@@ -276,7 +269,7 @@ client.on("messageCreate", async (message) => {
     const isCommand = message.content.startsWith(config.prefix);
     const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
     const command = args.length > 0 ? args.shift().toLowerCase() : null;
-    if (["help", "info", "leaderboard", "achievements", "train", "transform", "setlevel", "privacy"].includes(command)) {
+    if (["help", "info", "leaderboard", "achievements", "train", "transform", "revert", "setlevel", "privacy"].includes(command)) {
         waitAndDelete(message, 1500);
     }
 
@@ -378,6 +371,7 @@ client.on("messageCreate", async (message) => {
                 { name: `${config.prefix}achievements`, value: "Shows your unlocked achievements and progress.", inline: true },
                 { name: `${config.prefix}privacy`, value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
                 { name: `${config.prefix}transform`, value: "Changes your form, which drains stamina as you chat." },
+                { name: `${config.prefix}revert`, value: "Automatically reverts you to your normal form." },
                 { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." }
             )
             .setColor("#008B8B")
@@ -393,9 +387,9 @@ client.on("messageCreate", async (message) => {
 
         const infoEmbed = new EmbedBuilder()
             .setTitle("Displaying Current Tier & Power")
-            .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+            .setAuthor({ name: `${transformLabel(getCurrentForm(user))} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
-            .setColor(borderColor(user.transformation))
+            .setColor(borderColor(getCurrentForm(user)))
             .addFields(
                 { name: user.godki > 0 ? ":crossed_swords:God Tier" : ":crossed_swords:Tier", value: String(user.godki > 0 ? levelInfo.godLevel : user.level), inline: true },
                 { name: "Powerlevel", value: formatPowerLevel(user.points * user.transformation), inline: true },
@@ -415,14 +409,25 @@ client.on("messageCreate", async (message) => {
 
     if (command === "achievements") {
         const unlocked = new Set(user.achievements);
-        const achievementList = Object.entries(ACHIEVEMENTS)
-            .map(([id, achievement]) => `${unlocked.has(id) ? "🏅" : "🔒"} **${achievement.name}** — ${achievement.description}`)
-            .join("\n");
+        const achievementEntries = Object.entries(ACHIEVEMENTS)
+            .map(([id, achievement]) => `${unlocked.has(id) ? "🏅" : "🔒"} **${achievement.name}**\n${achievement.description}`);
+        const columnSize = Math.ceil(achievementEntries.length / 2);
+        const achievementColumns = [
+            achievementEntries.slice(0, columnSize),
+            achievementEntries.slice(columnSize)
+        ].filter((column) => column.length > 0);
         const achievementEmbed = new EmbedBuilder()
-            .setTitle(`${message.author.username}'s Achievements`)
-            .setDescription(achievementList)
+            .setAuthor({
+                name: `${message.author.username}'s Achievements`,
+                iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 })
+            })
+            .addFields(achievementColumns.map((column, index) => ({
+                name: achievementColumns.length === 1 ? "Achievements" : index === 0 ? "Achievements" : "More achievements",
+                value: column.join("\n\n"),
+                inline: true
+            })))
             .setColor("#FFD700")
-            .setFooter({ text: `${user.achievements.length} / ${Object.keys(ACHIEVEMENTS).length} unlocked` });
+            .setFooter({ text: `${user.achievements.length} of ${Object.keys(ACHIEVEMENTS).length} unlocked` });
 
         sendTemporary(message.channel, { embeds: [achievementEmbed] }, 30000, "achievements response");
         return;
@@ -449,9 +454,11 @@ client.on("messageCreate", async (message) => {
                         const tierLabel = data.godki > 0
                             ? `God Tier ${data.level - data.godki + 1}`
                             : `Tier ${data.level}`;
+                        const currentForm = data.transformationForm || "normal";
+                        const transformationLabel = currentForm === "normal" ? "" : `  •  ${currentForm.toUpperCase()}`;
                         const powerLevel = formatPowerLevel(data.points * data.transformation);
 
-                        return `${rankLabel} <@${data.userID}>\n└ ${tierLabel}  •  **${powerLevel}** power`;
+                        return `${rankLabel} <@${data.userID}>\n└ ${tierLabel}${transformationLabel}  •  **${powerLevel}** power`;
                     }).join("\n\n"),
                     inline: true
                 }));
@@ -570,13 +577,26 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    if (command === "revert") {
+        setTransformation(user, "normal");
+        client.points.set(key, user);
+        const baseForm = user.godki > 0 ? "Beyond God" : "Normal";
+        await sendTemporary(
+            message.channel,
+            `Reverted to ${baseForm}. Your power level is now ${formatPowerLevel(user.points * user.transformation)}.`,
+            10000,
+            "revert confirmation"
+        );
+        return;
+    }
+
     // Transformation changes require an unlocked form and available stamina.
     if (command === "transform") {
         const form = args.length > 0 ? args[0].toLowerCase() : null;
 
         if (!form || !Object.prototype.hasOwnProperty.call(TRANSFORM_RULES, form)) {
             const invalidTransform = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+                .setAuthor({ name: `${transformLabel(getCurrentForm(user))} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setColor("#FF0000")
                 .addFields(
                     { name: "Error!", value: "Additional arguments required!" },
@@ -589,20 +609,9 @@ client.on("messageCreate", async (message) => {
         }
 
         const rule = TRANSFORM_RULES[form];
-        if (user.godki > 0 && !rule.allowGod && form !== "ssgss") {
-            const godTierWarning = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
-                .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
-                .setColor("#FF0000")
-                .addFields({ name: "You've ascended to god tier.", value: "These transformations are no longer relevant to you anymore." });
-
-            sendTemporary(message.channel, { embeds: [godTierWarning] }, 10000, "god-tier transformation response");
-            return;
-        }
-
         if (user.level < rule.minLevel) {
             const lowLevelWarning = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+                .setAuthor({ name: `${transformLabel(getCurrentForm(user))} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setColor("#FF0000")
                 .addFields({ name: "Level too low!", value: "Additional power required to transform." });
@@ -616,10 +625,10 @@ client.on("messageCreate", async (message) => {
         }
 
         if (form === "normal") {
-            user.transformation = user.godki > 0 ? 80000 : 1;
+            setTransformation(user, "normal");
         } else {
             if (rule.setGodKi && user.godki < 1) user.godki = user.level;
-            user.transformation = rule.target;
+            setTransformation(user, form);
         }
 
         if (form !== "normal") awardAchievements(message, user, [`form_${form}`]);
@@ -630,9 +639,9 @@ client.on("messageCreate", async (message) => {
         const transformEmbed = new EmbedBuilder()
             .setTitle(form !== "normal" ? `${message.author.username} transformed!` : `${message.author.username} reverted to normal!`)
             .setDescription(form !== "normal" ? "Transformations amplify your power depending on the form you choose!" : "You reverted to your base form.")
-            .setAuthor({ name: `${transformLabel(transformedLevel)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+            .setAuthor({ name: `${transformLabel(form)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
-            .setColor(borderColor(transformedLevel))
+            .setColor(borderColor(form))
             .addFields(
                 { name: user.godki > 0 ? ":crossed_swords:God Tier" : ":crossed_swords:Tier", value: String(user.godki > 0 ? transformedProgress.godLevel : user.level), inline: true },
                 { name: "Powerlevel", value: formatPowerLevel(user.points * transformedLevel), inline: true },
@@ -662,7 +671,9 @@ client.on("messageCreate", async (message) => {
             return replyTemporary(message, "That user has opted out of progression tracking.", 10000, "setlevel privacy response");
         }
         const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
+        initializeUserProgress(targetUser);
         targetUser.level = setLevel;
+        setTransformation(targetUser, targetUser.transformationForm);
         client.points.set(targetKey, targetUser);
         sendTemporary(message.channel, `${userMention.tag} has been set to ${setLevel}.`, 10000, "setlevel confirmation");
         return;

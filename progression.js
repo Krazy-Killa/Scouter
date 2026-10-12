@@ -3,6 +3,22 @@ const XP_COOLDOWN_MS = 60 * 1000;
 const REPEATED_MESSAGE_WINDOW_MS = 10 * 60 * 1000;
 const BASE_LEVEL_XP = 5000;
 const LEVEL_XP_FACTOR = 3000;
+const GOD_KI_BASE_MULTIPLIER = 1;
+const GOD_KI_MAX_BASE_MULTIPLIER = 400;
+const GOD_KI_MAX_TIER = 64;
+const SSG_MIN_MULTIPLIER = 20000;
+const SSG_MAX_MULTIPLIER = 30000;
+
+const FORM_MULTIPLIERS = {
+    normal: 1,
+    ssj: 50,
+    ssj2: 100,
+    ssj3: 400,
+    ssg: SSG_MIN_MULTIPLIER,
+    ssgss: SSG_MIN_MULTIPLIER * 50
+};
+
+const VALID_FORMS = Object.keys(FORM_MULTIPLIERS);
 
 const ACHIEVEMENTS = {
     level_10: { name: "Rising Fighter", description: "Reach Tier 10." },
@@ -28,6 +44,7 @@ function createDefaultUser(authorId, guildId, now = Date.now()) {
         points: 2500,
         level: 1,
         transformation: 1,
+        transformationForm: "normal",
         godki: 0,
         stamina: MAX_STAMINA,
         staminaUpdatedAt: now,
@@ -42,12 +59,65 @@ function createDefaultUser(authorId, guildId, now = Date.now()) {
 }
 
 function initializeUserProgress(user) {
+    if (!VALID_FORMS.includes(user.transformationForm)) {
+        if (user.godki > 0) {
+            const legacyGodKiForms = {
+                80000: "normal",
+                160000: "ssg",
+                4000000: "ssj",
+                8000000: "ssgss",
+                32000000: "ssj3"
+            };
+            user.transformationForm = legacyGodKiForms[user.transformation] || "normal";
+        } else {
+            user.transformationForm = VALID_FORMS.find((form) => FORM_MULTIPLIERS[form] === user.transformation) || "normal";
+        }
+    }
+    if (user.godki > 0 && Number.isFinite(user.level)) {
+        setTransformation(user, user.transformationForm);
+    }
     if (!Number.isFinite(user.lastXpAt)) user.lastXpAt = 0;
     if (typeof user.lastXpContent !== "string") user.lastXpContent = "";
     if (!Number.isFinite(user.lastXpContentAt)) user.lastXpContentAt = 0;
     if (!Array.isArray(user.achievements)) user.achievements = [];
     if (!Number.isFinite(user.trainingStreakDays)) user.trainingStreakDays = 0;
     if (typeof user.lastTrainingDay !== "string") user.lastTrainingDay = null;
+}
+
+function getGodKiBaseMultiplier(godTierLevel = 1) {
+    const tier = Math.min(GOD_KI_MAX_TIER, Math.max(1, Math.floor(godTierLevel)));
+    const tierProgress = (tier - 1) / (GOD_KI_MAX_TIER - 1);
+    return GOD_KI_BASE_MULTIPLIER +
+        Math.floor((GOD_KI_MAX_BASE_MULTIPLIER - GOD_KI_BASE_MULTIPLIER) * tierProgress);
+}
+
+function getSsgMultiplier(godTierLevel = 1) {
+    const tier = Math.min(GOD_KI_MAX_TIER, Math.max(1, Math.floor(godTierLevel)));
+    const tierProgress = (tier - 1) / (GOD_KI_MAX_TIER - 1);
+    return SSG_MIN_MULTIPLIER + Math.floor((SSG_MAX_MULTIPLIER - SSG_MIN_MULTIPLIER) * tierProgress);
+}
+
+function getGodTierLevel(user) {
+    return user.godki > 0 ? Math.max(1, user.level - user.godki + 1) : 0;
+}
+
+function getTransformationMultiplier(form, godki = 0, godTierLevel = 1) {
+    if (!Object.prototype.hasOwnProperty.call(FORM_MULTIPLIERS, form)) {
+        throw new Error(`Unknown transformation form: ${form}`);
+    }
+    const godKiBase = getGodKiBaseMultiplier(godTierLevel);
+    if (godki > 0 && form === "normal") return godKiBase;
+    if (godki > 0 && form === "ssg") return getSsgMultiplier(godTierLevel);
+    if (godki > 0 && form === "ssgss") return getSsgMultiplier(godTierLevel) * 50;
+    if (godki > 0 && ["ssj", "ssj2", "ssj3"].includes(form)) {
+        return godKiBase * FORM_MULTIPLIERS[form];
+    }
+    return FORM_MULTIPLIERS[form];
+}
+
+function setTransformation(user, form) {
+    user.transformationForm = form;
+    user.transformation = getTransformationMultiplier(form, user.godki, getGodTierLevel(user) || 1);
 }
 
 function getXpRequiredForLevel(level) {
@@ -61,6 +131,10 @@ function addExperience(user, amount) {
     while (user.points - 2500 >= getXpRequiredForLevel(user.level)) {
         user.level += 1;
         levelsGained += 1;
+    }
+
+    if (levelsGained > 0 && user.godki > 0) {
+        setTransformation(user, user.transformationForm || "normal");
     }
 
     return levelsGained;
@@ -119,16 +193,24 @@ module.exports = {
     ACHIEVEMENTS,
     MAX_STAMINA,
     XP_COOLDOWN_MS,
+    GOD_KI_BASE_MULTIPLIER,
+    GOD_KI_MAX_BASE_MULTIPLIER,
+    GOD_KI_MAX_TIER,
     REPEATED_MESSAGE_WINDOW_MS,
     addExperience,
     canEarnMessageXp,
     createDefaultUser,
+    getGodKiBaseMultiplier,
+    getGodTierLevel,
     getProgressAchievementIds,
+    getSsgMultiplier,
+    getTransformationMultiplier,
     getXpRequiredForLevel,
     initializeUserProgress,
     normalizeMessage,
     optInUser,
     optOutUser,
     recordMessageXp,
-    recordTrainingDay
+    recordTrainingDay,
+    setTransformation
 };

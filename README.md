@@ -62,6 +62,7 @@ Commands use the configured prefix, which defaults to `!`. Set another prefix wi
 | `achievements` | `!achievements` | Lists unlocked and locked achievements. |
 | `train` | `!train` | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
 | `transform` | `!transform <form>` | Changes your form. Valid forms: `normal`, `ssj`, `ssj2`, `ssj3`, `ssg`, `ssgss`. |
+| `revert` | `!revert` | Automatically returns you to your normal form (Beyond God if you have god ki). |
 | `privacy` | `!privacy optout` or `!privacy optin` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
 | `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's level. Only the server owner can use this command. |
 
@@ -80,7 +81,7 @@ For leaderboards with multiple pages, use the left and right reactions beneath t
 | SSG | 50 | 2,025,000 | 4,500 | 5 |
 | SSGSS | 64 | 2,125,000 | 5,000 | 10 |
 
-Users who have reached god ki cannot return to the non-god forms. In god ki, `normal` means the 80,000 base god form. Stamina is capped at 10,000 and regenerates at 2,000 per day while in base form. When transformed stamina reaches zero, the user drops one form.
+Transforming into either SSG or SSGSS activates god ki and records the user's current level as their starting God Tier. In god ki, the `normal` form is called Beyond God: its multiplier scales linearly from 1× at God Tier 1 to 400× at God Tier 64. SSJ, SSJ2, and SSJ3 multiply the Beyond God multiplier by their usual 50×, 100×, and 400×. SSG scales linearly from 20,000× at God Tier 1 to 30,000× at God Tier 64, and SSGSS is always 50× the current SSG multiplier (1,000,000× to 1,500,000×). These god-ki multipliers update as the user gains God Tiers and stop increasing after Tier 64. SSG and SSGSS remain unlocked at overall levels 50 and 64, respectively. Stamina is capped at 10,000 and regenerates at 2,000 per day while in base form. When transformed stamina reaches zero, the user drops one form.
 
 ## Data backup and restore
 

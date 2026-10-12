@@ -48,10 +48,6 @@ const config = {
     minsize: Number(process.env.MIN_MSG_SIZE ?? fileConfig.minsize ?? 2)
 };
 
-if (!config.token || config.token === "REPLACE_WITH_DISCORD_TOKEN") {
-    throw new Error("Missing Discord token. Set DISCORD_TOKEN in your environment or provide a local config.json that is not committed to git.");
-}
-
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -115,7 +111,7 @@ function formatPowerLevel(power) {
 
 function waitAndDelete(message, ms) {
     if (!message) return;
-    setTimeout(async () => {
+    const deleteTimer = setTimeout(async () => {
         try {
             await message.delete();
         } catch (error) {
@@ -124,6 +120,7 @@ function waitAndDelete(message, ms) {
             }
         }
     }, ms);
+    deleteTimer.unref?.();
 }
 
 async function sendTemporary(channel, content, deleteAfterMs, context) {
@@ -293,6 +290,7 @@ function sendNewUserNotice(guildId, channel, user) {
         sendNotice();
     } else if (!state.timer) {
         state.timer = setTimeout(sendNotice, timeUntilNextNotice);
+        state.timer.unref?.();
     }
 }
 
@@ -311,7 +309,7 @@ client.on("clientReady", () => {
     console.log(`[NOTICE] Bot has started, with ${client.users.cache.size} users, in ${client.channels.cache.size} channels of ${client.guilds.cache.size} guilds.`);
 });
 
-client.on("messageCreate", async (message) => {
+async function handleMessage(message) {
     if (!message.guild || message.author.bot) return;
 
     const rightNow = Date.now();
@@ -319,7 +317,7 @@ client.on("messageCreate", async (message) => {
     const isCommand = message.content.startsWith(config.prefix);
     const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
     const command = args.length > 0 ? args.shift().toLowerCase() : null;
-    if (["help", "profile", "compare", "scan", "leaderboard", "achievements", "train", "transform", "revert", "setlevel", "setpower", "reset", "privacy"].includes(command)) {
+    if (["help", "profile", "compare", "scan", "leaderboard", "achievements", "train", "transform", "revert", "setlevel", "setpower", "awardpower", "reset", "privacy"].includes(command)) {
         waitAndDelete(message, 1500);
     }
 
@@ -512,6 +510,7 @@ client.on("messageCreate", async (message) => {
                 { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." },
                 { name: `${config.prefix}setlevel @user <level>`, value: "Set a member's tier (server owner only)." },
                 { name: `${config.prefix}setpower @user <power>`, value: "Set a member's base power and recalculate their tier (server owner only)." },
+                { name: `${config.prefix}awardpower @user <amount> [reason]`, value: "Add base power to a member and recalculate their tier (server owner only)." },
                 { name: `${config.prefix}reset @user`, value: "Reset a member's progression to a fresh profile (server owner only)." }
             )
             .setColor("#008B8B")
@@ -645,6 +644,10 @@ client.on("messageCreate", async (message) => {
         client.points.set(key, user);
 
         const filtered = client.points.filter((p) => p.guildID === message.guild.id);
+        for (const record of filtered) {
+            initializeUserProgress(record);
+            client.points.set(`${record.guildID}-${record.userID}`, record);
+        }
         const sorted = filtered.sort((a, b) => b.points * b.transformation - a.points * a.transformation);
         const pageSize = 10;
         const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
@@ -872,7 +875,7 @@ client.on("messageCreate", async (message) => {
     }
 
     // Guild-owner-only utilities for administrative progression adjustments.
-    if (["setlevel", "setpower", "reset"].includes(command)) {
+    if (["setlevel", "setpower", "awardpower", "reset"].includes(command)) {
         const guildOwner = message.guild.ownerId ?? null;
         if (message.author.id !== guildOwner) {
             return replyTemporary(message, "Only the server owner can use this progression command.", 10000, `${command} permission response`);
@@ -908,6 +911,43 @@ client.on("messageCreate", async (message) => {
             return sendTemporary(message.channel, `${userMention.tag} has been set to Tier ${setLevel}.`, 10000, "setlevel confirmation");
         }
 
+        if (command === "awardpower") {
+            const awardAmount = Number(args[1]?.replaceAll(",", ""));
+            if (!Number.isSafeInteger(awardAmount) || awardAmount < 1) {
+                return replyTemporary(message, "Enter a positive whole-number power award.", 10000, "awardpower validation response");
+            }
+            const reason = args.slice(2).join(" ").trim();
+            if (reason.length > 200) {
+                return replyTemporary(message, "Keep the award reason to 200 characters or fewer.", 10000, "awardpower reason validation response");
+            }
+
+            const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
+            initializeUserProgress(targetUser);
+            const awardedPower = targetUser.points + awardAmount;
+            if (!Number.isSafeInteger(awardedPower)) {
+                return replyTemporary(message, "That award would exceed the maximum supported power value.", 10000, "awardpower overflow response");
+            }
+
+            setBasePower(targetUser, awardedPower);
+            client.points.set(targetKey, targetUser);
+            awardAchievements(
+                { author: userMention, channel: message.channel },
+                targetUser,
+                getProgressAchievementIds(targetUser)
+            );
+
+            const tierLabel = targetUser.godki > 0
+                ? `God Tier ${getGodTierLevel(targetUser)}`
+                : `Tier ${targetUser.level}`;
+            const reasonText = reason ? ` Reason: ${reason.replace(/@/g, "@\u200b")}` : "";
+            return sendTemporary(
+                message.channel,
+                `${numeral(awardAmount).format("0,0")} base power awarded to ${userMention.tag}; their base power is now ${numeral(targetUser.points - 2500).format("0,0")} (${tierLabel}).${reasonText}`,
+                10000,
+                "awardpower confirmation"
+            );
+        }
+
         const setPower = Number(args[1]?.replaceAll(",", ""));
         if (!Number.isSafeInteger(setPower) || setPower < 2500) {
             return replyTemporary(message, "Enter a whole-number base power of at least 2,500.", 10000, "setpower validation response");
@@ -926,13 +966,20 @@ client.on("messageCreate", async (message) => {
             "setpower confirmation"
         );
     }
-});
+}
+
+client.on("messageCreate", handleMessage);
 
 client.on("error", (error) => console.error(error));
 client.on("warn", (warning) => console.warn(warning));
 
-import("enmap")
-    .then(async ({ default: Enmap }) => {
+async function start() {
+    try {
+        if (!config.token || config.token === "REPLACE_WITH_DISCORD_TOKEN") {
+            throw new Error("Missing Discord token. Set DISCORD_TOKEN in your environment or provide a local config.json that is not committed to git.");
+        }
+
+        const { default: Enmap } = await import("enmap");
         const { stringify } = await import("better-serialize");
         const databasePath = resolve(process.cwd(), "data", "enmap.sqlite");
         if (existsSync(databasePath)) {
@@ -945,9 +992,15 @@ import("enmap")
         }
         client.points = new Enmap({ name: "points" });
         client.privacy = new Enmap({ name: "privacy" });
-        return client.login(config.token);
-    })
-    .catch((error) => {
+        await client.login(config.token);
+    } catch (error) {
         console.error("Failed to initialize Enmap or log in to Discord:", error);
         process.exitCode = 1;
-    });
+    }
+}
+
+if (require.main === module) {
+    start();
+}
+
+module.exports = { client, config, handleMessage };

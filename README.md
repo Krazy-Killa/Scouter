@@ -70,9 +70,10 @@ Commands use the configured prefix, which defaults to `!`. Set another prefix wi
 | `privacy` | `!privacy optout` or `!privacy optin` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
 | `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's tier without changing their accumulated power. Only the server owner can use this command. Setting the tier below 50 removes God Ki and reverts Super Saiyan God/Super Saiyan God Super Saiyan to normal. |
 | `setpower` | `!setpower @user <power>` or `!setpower <user-id> <power>` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500; only the server owner can use it. Setting power below Tier 50 removes God Ki and reverts Super Saiyan God/Super Saiyan God Super Saiyan to normal. |
+| `awardpower` | `!awardpower @user <amount> [reason]` | Adds a positive whole-number amount to a member's base power, recalculates their tier, and checks progression achievements. Only the server owner can use this command; opted-out members cannot receive awards. |
 | `reset` | `!reset @user` or `!reset <user-id>` | Resets an existing progression profile to its fresh starting state, including power, tier, form, stamina, training history, cooldowns, and achievements. Only the server owner can use this command. |
 
-Replace `!` in these examples if you configured a different prefix. `setlevel` changes only the tier, while `setpower` changes base power and recalculates the tier. Administrative commands cannot modify a member who opted out of progression tracking.
+Replace `!` in these examples if you configured a different prefix. `setlevel` changes only the tier, `setpower` replaces base power and recalculates the tier, and `awardpower` adds to base power. Administrative commands cannot modify a member who opted out of progression tracking.
 
 For leaderboards with multiple pages, use the left and right reactions beneath the leaderboard to navigate. The controls are available to the person who ran the command for two minutes.
 
@@ -115,7 +116,7 @@ The caps keep the forms in order: Super Saiyan < Super Saiyan 2 < Super Saiyan 3
 
 ## Data backup and restore
 
-Enmap stores progression and privacy preferences in `data/enmap.sqlite` under the project folder. This folder is intentionally ignored by Git; back it up separately and keep backups private because they contain user progression records.
+Enmap stores progression records and privacy preferences in `data/enmap.sqlite` under the project folder. This folder is intentionally ignored by Git. Backups contain members' progression data and opt-out state, so restrict access to the backup location and keep backups private.
 
 To make a backup on Windows, stop the bot first so SQLite has closed its files, then copy the entire `data` folder to a safe location. For example, from the project folder in PowerShell:
 
@@ -124,7 +125,7 @@ $backup = Join-Path $env:USERPROFILE ("Scouter-data-" + (Get-Date -Format "yyyyM
 Compress-Archive -Path .\data -DestinationPath $backup
 ```
 
-To restore, stop the bot, preserve or rename the existing `data` folder, then extract the chosen backup into the project folder. For example:
+To restore, stop the bot, preserve or rename the existing `data` folder, then extract the chosen backup into the project folder. Restoring an older backup can restore progression records that were later deleted and can also roll privacy preferences back to the time of that backup. After startup, reapply any opt-out requests received since the backup was made with `!privacy optout` before allowing members to use progression features; this removes the restored progression record and saves the opt-out marker. For example:
 
 ```powershell
 Rename-Item .\data .\data-before-restore
@@ -135,7 +136,7 @@ Replace the example timestamp with the backup file's name. Start the bot after e
 
 ## Tests
 
-Run the progression unit tests with:
+Run the progression and command-flow tests with:
 
 ```sh
 npm test
@@ -143,7 +144,9 @@ npm test
 
 ## User privacy
 
-Use `!privacy optout` to stop progression tracking in the current server and delete that server's active progression record, including power, training state, and achievements. While opted out, the bot does not process progression commands or ordinary chat for that user. Use `!privacy optin` to resume tracking; a fresh record is created on the user's next chat message. Existing backups may still contain an earlier copy of a deleted record; remove those backup files too if you need to erase that historical copy.
+Use `!privacy optout` to stop progression tracking in the current server and delete that server's active progression record, including power, training state, and achievements. Opt-out is per server; it does not affect data the member may have in another server. While opted out, ordinary chat does not create or update the member's record, and scans, profiles, and comparisons cannot read it. The `!privacy` command remains available to opt back in; a fresh record is created on the member's next chat message.
+
+Progression commands may post profile or scan details in the channel where they are used, so choose an appropriately private channel if those details should not be visible to everyone who can read it. Opting out deletes the active record but cannot erase copies in backups already made. If a member requests deletion of historical copies too, remove the relevant backup files; account for that request when restoring any older backup.
 
 ## Progression and training
 

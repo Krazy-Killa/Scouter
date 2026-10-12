@@ -160,13 +160,23 @@ test("scales Beyond God and SSG multipliers linearly across God Tier 1 through 1
     assert.equal(getSsgMultiplier(100), 30000);
 });
 
-test("uses tier-scaled multipliers for all god-ki forms", () => {
+test("keeps every god-ki Saiyan form below SSG while preserving form order", () => {
     assert.equal(getTransformationMultiplier("normal", 1, 1), 1);
     assert.equal(getTransformationMultiplier("ssj", 1, 1), 50);
-    assert.equal(getTransformationMultiplier("ssj2", 1, 15), 40000);
-    assert.equal(getTransformationMultiplier("ssj3", 1, 15), 160000);
+    assert.equal(getTransformationMultiplier("ssj2", 1, 15), 20000);
+    assert.equal(getTransformationMultiplier("ssj3", 1, 15), 22500);
     assert.equal(getTransformationMultiplier("ssg", 1, 15), 30000);
     assert.equal(getTransformationMultiplier("ssgss", 1, 15), 1500000);
+    for (let tier = 1; tier <= 15; tier += 1) {
+        const ssj = getTransformationMultiplier("ssj", 1, tier);
+        const ssj2 = getTransformationMultiplier("ssj2", 1, tier);
+        const ssj3 = getTransformationMultiplier("ssj3", 1, tier);
+        const ssg = getTransformationMultiplier("ssg", 1, tier);
+        assert.ok(ssj3 <= Math.floor(ssg * 0.75), `SSJ3 should be capped at 75% of SSG at God Tier ${tier}`);
+        assert.ok(ssj < ssj2, `SSJ should remain below SSJ2 at God Tier ${tier}`);
+        assert.ok(ssj2 < ssj3, `SSJ2 should remain below SSJ3 at God Tier ${tier}`);
+        assert.ok(ssj3 < ssg, `SSJ3 should remain below SSG at God Tier ${tier}`);
+    }
     assert.equal(
         getTransformationMultiplier("ssgss", 1, 8),
         getTransformationMultiplier("ssg", 1, 8) * 50

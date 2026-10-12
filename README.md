@@ -59,16 +59,17 @@ Commands use the configured prefix, which defaults to `!`. Set another prefix wi
 | Command | Usage | Description |
 |---|---|---|
 | `help` | `!help` | Lists the bot's commands. |
-| `profile` | `!profile [@user]` | Shows your tier, displayed power, form, stamina, progress to the next tier, and achievements, or a server member's profile. Profiles are unavailable for members who opted out. |
-| `compare` | `!compare @user` | Compares your tier, displayed power, form, stamina, and achievements with another member. |
+| `scan` | `!scan`, `!scan @user`, or `!scan <user-id>` | Displays a scouter-style power reading for you or another server member. Users who opted out of tracking cannot be scanned. |
+| `profile` | `!profile [@user]` | Shows base and displayed power, tier, form, stamina, progress to the next tier, achievements, and power earned per eligible message; can also show another member's profile. Profiles are unavailable for members who opted out. |
+| `compare` | `!compare @user` or `!compare <user-id>` | Compares base and displayed power, tier, form, stamina, progress, and achievements with another server member. |
 | `leaderboard` | `!leaderboard` | Shows the all-time rankings for the current server, 10 users per page, ordered by displayed power level. Use the left and right reactions to change pages. |
 | `achievements` | `!achievements` | Lists unlocked and locked achievements. |
 | `train` | `!train` | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
 | `transform` | `!transform <form>` | Changes your form. Valid forms: `normal`, `ssj`, `ssj2`, `ssj3`, `ssg`, `ssgss`. |
 | `revert` | `!revert` | Automatically returns you to your normal form (Beyond God if you have god ki). |
 | `privacy` | `!privacy optout` or `!privacy optin` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
-| `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's tier without changing their accumulated power. Only the server owner can use this command. Setting the tier below 50 removes God Ki and reverts SSG/SSGSS to normal. |
-| `setpower` | `!setpower @user <power>` or `!setpower <user-id> <power>` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500; only the server owner can use it. Setting power below Tier 50 removes God Ki and reverts SSG/SSGSS to normal. |
+| `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's tier without changing their accumulated power. Only the server owner can use this command. Setting the tier below 50 removes God Ki and reverts Super Saiyan God/Super Saiyan God Super Saiyan to normal. |
+| `setpower` | `!setpower @user <power>` or `!setpower <user-id> <power>` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500; only the server owner can use it. Setting power below Tier 50 removes God Ki and reverts Super Saiyan God/Super Saiyan God Super Saiyan to normal. |
 | `reset` | `!reset @user` or `!reset <user-id>` | Resets an existing progression profile to its fresh starting state, including power, tier, form, stamina, training history, cooldowns, and achievements. Only the server owner can use this command. |
 
 Replace `!` in these examples if you configured a different prefix. `setlevel` changes only the tier, while `setpower` changes base power and recalculates the tier. Administrative commands cannot modify a member who opted out of progression tracking.
@@ -79,14 +80,14 @@ For leaderboards with multiple pages, use the left and right reactions beneath t
 
 | Form | Minimum level | Training power | Training stamina cost | Stamina per eligible message |
 |---|---:|---:|---:|---:|
-| Normal | 1 | 5,000 | 10 | 0 |
-| SSJ | 4 | 244,000 | 500 | 1 |
-| SSJ2 | 8 | 480,000 | 1,000 | 2 |
-| SSJ3 | 16 | 1,880,000 | 4,000 | 4 |
-| SSG | 50 | 2,025,000 | 4,500 | 5 |
-| SSGSS | 64 | 2,125,000 | 5,000 | 10 |
+| Normal (Beyond God with god ki) | 1 | 5,000 | 10 | 0 |
+| Super Saiyan | 4 | 244,000 | 500 | 1 |
+| Super Saiyan 2 | 8 | 480,000 | 1,000 | 2 |
+| Super Saiyan 3 | 16 | 1,880,000 | 4,000 | 15 |
+| Super Saiyan God | 50 | 2,025,000 | 4,500 | 5 |
+| Super Saiyan God Super Saiyan | 64 | 2,125,000 | 5,000 | 10 |
 
-Transforming into either SSG or SSGSS activates god ki and records the user's current overall level as their starting point: that level becomes God Tier 1. For a user who awakens god ki at overall level 50, overall level 64 is God Tier 15. In god ki, the `normal` form is called Beyond God: its multiplier scales linearly from 1× at God Tier 1 to 400× at God Tier 15. SSJ, SSJ2, and SSJ3 multiply the Beyond God multiplier by their usual 50×, 100×, and 400×. SSG scales linearly from 20,000× at God Tier 1 to 30,000× at God Tier 15, and SSGSS is always 50× the current SSG multiplier (1,000,000× to 1,500,000×). These god-ki multipliers update as the user gains God Tiers and stop increasing after Tier 15. SSG and SSGSS remain unlocked at overall levels 50 and 64, respectively. Stamina is capped at 10,000 and regenerates at 2,000 per day while in base form. When transformed stamina reaches zero, the user drops one form.
+Transforming into either Super Saiyan God or Super Saiyan God Super Saiyan activates god ki and records the user's current overall level as their starting point: that level becomes God Tier 1. For a user who awakens god ki at overall level 50, overall level 64 is God Tier 15. With god ki, the base form is called Beyond God: its multiplier scales linearly from 1× at God Tier 1 to 400× at God Tier 15. Super Saiyan, Super Saiyan 2, and Super Saiyan 3 scale from their usual 50×, 100×, and 400× Beyond God multipliers, capped at one-third, two-thirds, and three-quarters of the current Super Saiyan God multiplier, respectively. Super Saiyan 3 also drains 15 stamina per eligible message, compared with 5 for Super Saiyan God. Super Saiyan God scales linearly from 20,000× at God Tier 1 to 30,000× at God Tier 15, and Super Saiyan God Super Saiyan is always 50× the current Super Saiyan God multiplier (1,000,000× to 1,500,000×). These god-ki multipliers update as the user gains God Tiers and stop increasing after Tier 15. The two god forms remain unlocked at overall levels 50 and 64, respectively. Stamina is capped at 10,000 and regenerates at 2,000 per day while in base form. When transformed stamina reaches zero, the user drops one form.
 
 ## Data backup and restore
 
@@ -124,7 +125,7 @@ Use `!privacy optout` to stop progression tracking in the current server and del
 
 - Eligible messages grant 400–660 progression power, independent of transformation. The base random award is 400–600; messages earn up to 10% extra based on non-whitespace length, capped at 200 characters. Transformation multipliers remain in effect for displayed power level.
 - To reduce chat spam, only one message per user can earn power every 60 seconds. Repeating the same normalized message within 10 minutes of its last power award does not earn power.
-- The XP required to advance from level `L` is cumulative: `5,000 × L + 3,000 × (L × (L + 1) × (2L + 1) / 6)`. SSGSS remains unlocked at level 64.
+- The XP required to advance from level `L` is cumulative: `5,000 × L + 3,000 × (L × (L + 1) × (2L + 1) / 6)`. Super Saiyan God Super Saiyan remains unlocked at level 64.
 - Messages shorter than the configured minimum size and messages beginning with the command prefix do not grant progression power.
 - Training rewards use form-specific multipliers and penalties, separate from the lore-based displayed power multipliers. Base-form training is the most stamina-efficient option.
 - A user's progression record is created the first time they chat in a server. New-user notices are batched per server and sent no more than once per minute, showing both the number added in that update and the total users tracked.

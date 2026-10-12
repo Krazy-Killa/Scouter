@@ -77,7 +77,7 @@ const TRANSFORM_RULES = {
     normal: { minLevel: 1, trainingMultiplier: 1, trainingPenalty: 0, trainingCost: 10, messageDrain: 0 },
     ssj: { minLevel: 4, trainingMultiplier: 50, trainingPenalty: 0.024, trainingCost: 500, messageDrain: 1 },
     ssj2: { minLevel: 8, trainingMultiplier: 100, trainingPenalty: 0.04, trainingCost: 1000, messageDrain: 2 },
-    ssj3: { minLevel: 16, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 4 },
+    ssj3: { minLevel: 16, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 15 },
     ssg: { minLevel: 50, setGodKi: true, trainingMultiplier: 450, trainingPenalty: 0.1, trainingCost: 4500, messageDrain: 5 },
     ssgss: { minLevel: 64, setGodKi: true, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 }
 };
@@ -91,7 +91,20 @@ const borderColor = (form) => {
     return "#08ff00";
 };
 
-const transformLabel = (form) => form === "normal" ? "" : form.toUpperCase();
+function transformationName(form, godki = 0) {
+    if (form === "normal") return godki > 0 ? "Beyond God" : "Normal";
+    return {
+        ssj: "Super Saiyan",
+        ssj2: "Super Saiyan 2",
+        ssj3: "Super Saiyan 3",
+        ssg: "Super Saiyan God",
+        ssgss: "Super Saiyan God Super Saiyan"
+    }[form] || "Normal";
+}
+
+const transformLabel = (form, godki = 0) => form === "normal"
+    ? ""
+    : `${transformationName(form, godki)} `;
 
 function formatPowerLevel(power) {
     return power < 100000
@@ -187,15 +200,22 @@ function getProfileDetails(user) {
         ? `God Tier ${levelProgress.godLevel}`
         : `Tier ${user.level}`;
     return [
-        `**${tier}**`,
-        `Powerlevel: ${formatPowerLevel(user.points * user.transformation)}`,
-        `Form: ${getCurrentForm(user).toUpperCase()}`,
-        `Stamina: ${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`,
-        levelProgress.difference > 0
-            ? `Next tier in: ${numeral(levelProgress.difference).format("0,0")} power`
-            : "Ready to advance to the next tier",
-        `Achievements: ${user.achievements.length} / ${Object.keys(ACHIEVEMENTS).length}`
+        `**Tier:** ${tier}`,
+        `**Base power:** ${numeral(user.points - 2500).format("0,0")}`,
+        `**Displayed power:** ${formatPowerLevel(user.points * user.transformation)}`,
+        `**Current form:** ${transformationName(getCurrentForm(user), user.godki)}`,
+        `**Stamina:** ${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`,
+        `**Next tier:** ${levelProgress.difference > 0
+            ? `${numeral(levelProgress.difference).format("0,0")} more power needed`
+            : "Ready to advance"}`,
+        `**Achievements:** ${user.achievements.length} / ${Object.keys(ACHIEVEMENTS).length}`
     ].join("\n");
+}
+
+function getMessagePowerRange() {
+    const minimum = BASE_MESSAGE_XP;
+    const maximum = Math.floor((BASE_MESSAGE_XP + MESSAGE_XP_VARIANCE) * (1 + MESSAGE_LENGTH_BONUS));
+    return `${numeral(minimum).format("0,0")}–${numeral(maximum).format("0,0")} power per eligible message, depending on message length.`;
 }
 
 // Send one summary even if a large reward crosses several levels.
@@ -298,7 +318,7 @@ client.on("messageCreate", async (message) => {
     const isCommand = message.content.startsWith(config.prefix);
     const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
     const command = args.length > 0 ? args.shift().toLowerCase() : null;
-    if (["help", "profile", "compare", "leaderboard", "achievements", "train", "transform", "revert", "setlevel", "setpower", "reset", "privacy"].includes(command)) {
+    if (["help", "profile", "compare", "scan", "leaderboard", "achievements", "train", "transform", "revert", "setlevel", "setpower", "reset", "privacy"].includes(command)) {
         waitAndDelete(message, 1500);
     }
 
@@ -329,6 +349,93 @@ client.on("messageCreate", async (message) => {
                 "privacy command instructions"
             );
         }
+        return;
+    }
+
+    if (command === "scan") {
+        let targetMember = message.mentions.members.first()
+            || (args[0] ? message.guild.members.cache.get(args[0]) : null);
+        if (!targetMember && args[0] && /^\d{17,20}$/.test(args[0])) {
+            try {
+                targetMember = await message.guild.members.fetch(args[0]);
+            } catch (error) {
+                if (error.code !== 10007 && error.code !== 10013) {
+                    console.error(`Failed to fetch scan target ${args[0]}:`, error);
+                    await replyTemporary(message, "The scouter could not complete the scan. Try again shortly.", 10000, "scan member lookup error");
+                    return;
+                }
+            }
+        }
+        if (args.length > 0 && !targetMember) {
+            await replyTemporary(message, `Mention a server member or provide their ID. Example: \`${config.prefix}scan @user\` or \`${config.prefix}scan user-id\`.`, 10000, "scan usage response");
+            return;
+        }
+
+        const targetUser = targetMember ? targetMember.user : message.author;
+        const targetKey = `${message.guild.id}-${targetUser.id}`;
+        const displayName = targetMember?.displayName
+            || (targetUser.id === message.author.id ? message.member?.displayName : null)
+            || targetUser.username;
+        const scanEmbed = new EmbedBuilder()
+            .setTitle("SCOUTER // POWER SCAN")
+            .setAuthor({
+                name: `Target acquired: ${displayName}`,
+                iconURL: targetUser.displayAvatarURL({ extension: "png", size: 64 })
+            })
+            .setThumbnail(targetUser.displayAvatarURL({ dynamic: true, size: 256 }))
+            .setColor("#E34B4B");
+
+        if (client.privacy.get(targetKey)) {
+            scanEmbed
+                .setDescription("**SCAN BLOCKED**")
+                .addFields(
+                    { name: "Signal", value: "Privacy lock engaged", inline: true },
+                    { name: "Power reading", value: "Unavailable", inline: true },
+                    { name: "Result", value: "This member has opted out of progression tracking. The scouter cannot read their power." }
+                );
+        } else {
+            const targetRecord = targetUser.id === message.author.id
+                ? client.points.get(key) || createDefaultUser(targetUser.id, message.guild.id, rightNow)
+                : client.points.get(targetKey);
+            if (!targetRecord) {
+                scanEmbed
+                    .setDescription("**NO POWER DATA**")
+                    .addFields(
+                        { name: "Signal", value: "No registered reading", inline: true },
+                        { name: "Power reading", value: "Unknown", inline: true },
+                        { name: "Scan status", value: "Unreadable • No profile data", inline: true },
+                        { name: "Result", value: "No progression profile exists for this member in this server yet." }
+                    );
+            } else {
+                const scannedUser = createProfileSnapshot(targetRecord, rightNow);
+                const levelProgress = getLevelProgress(scannedUser);
+                const tier = scannedUser.godki > 0
+                    ? `God Tier ${levelProgress.godLevel}`
+                    : `Tier ${scannedUser.level}`;
+                scanEmbed
+                    .setDescription("**SCAN COMPLETE**")
+                    .setColor(borderColor(getCurrentForm(scannedUser)))
+                    .addFields(
+                        { name: "Power reading", value: `⚡ **${formatPowerLevel(scannedUser.points * scannedUser.transformation)}**`, inline: true },
+                        { name: "Base power", value: numeral(scannedUser.points - 2500).format("0,0"), inline: true },
+                        { name: "Signal profile", value: `${tier} • ${transformationName(getCurrentForm(scannedUser), scannedUser.godki)}`, inline: true },
+                        { name: "Stamina", value: `${numeral(Math.floor(scannedUser.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true },
+                        {
+                            name: "Next tier",
+                            value: levelProgress.difference > 0
+                                ? `${numeral(levelProgress.difference).format("0,0")} more power needed`
+                                : "Ready to advance",
+                            inline: true
+                        },
+                        { name: "Scan status", value: "Readable • Progression tracking is enabled", inline: true }
+                    );
+            }
+        }
+        scanEmbed.setFooter({
+            text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`,
+            iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 })
+        });
+        await sendTemporary(message.channel, { embeds: [scanEmbed] }, 15000, "scan response");
         return;
     }
 
@@ -393,8 +500,9 @@ client.on("messageCreate", async (message) => {
         const help = new EmbedBuilder()
             .setTitle("Command List")
             .addFields(
+                { name: `${config.prefix}scan [@user|user-id]`, value: "Run a power scan on yourself or another member; opted-out members cannot be scanned.", inline: true },
                 { name: `${config.prefix}profile [@user]`, value: "Displays your tier, power, form, stamina, progress, and achievements, or another member's profile.", inline: true },
-                { name: `${config.prefix}compare @user`, value: "Compares your progression with another member.", inline: true },
+                { name: `${config.prefix}compare @user|user-id`, value: "Compares your progression with another server member by mention or ID.", inline: true },
                 { name: `${config.prefix}leaderboard`, value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
                 { name: `${config.prefix}achievements`, value: "Shows your unlocked achievements and progress.", inline: true },
                 { name: `${config.prefix}privacy`, value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
@@ -414,14 +522,25 @@ client.on("messageCreate", async (message) => {
     }
 
     if (command === "profile" || command === "compare") {
-        const targetMember = message.mentions.members.first()
+        let targetMember = message.mentions.members.first()
             || (args[0] ? message.guild.members.cache.get(args[0]) : null);
+        if (command === "compare" && !targetMember && /^\d{17,20}$/.test(args[0] || "")) {
+            try {
+                targetMember = await message.guild.members.fetch(args[0]);
+            } catch (error) {
+                if (error.code !== 10007 && error.code !== 10013) {
+                    console.error(`Failed to fetch comparison member ${args[0]}:`, error);
+                    await replyTemporary(message, "Could not look up that member right now. Please try again later.", 10000, "compare member lookup error");
+                    return;
+                }
+            }
+        }
         if (command === "profile" && args.length > 0 && !targetMember) {
             await replyTemporary(message, `Mention a server member or use \`${config.prefix}profile\` to view your own profile.`, 10000, "profile usage response");
             return;
         }
         if (command === "compare" && !targetMember) {
-            await replyTemporary(message, `Mention a server member to compare with. Example: \`${config.prefix}compare @user\`.`, 10000, "compare usage response");
+            await replyTemporary(message, `Mention a server member or provide their ID. Example: \`${config.prefix}compare @user\` or \`${config.prefix}compare user-id\`.`, 10000, "compare usage response");
             return;
         }
         if (command === "compare" && targetMember.id === message.author.id) {
@@ -461,13 +580,18 @@ client.on("messageCreate", async (message) => {
         if (command === "profile") {
             const profileEmbed = new EmbedBuilder()
                 .setAuthor({
-                    name: `${transformLabel(getCurrentForm(profile))} ${displayName}`,
+                    name: `${transformLabel(getCurrentForm(profile), profile.godki)}${displayName}`,
                     iconURL: targetUser.displayAvatarURL({ extension: "png", size: 64 })
                 })
                 .setThumbnail(targetUser.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setTitle("Progression Profile")
                 .setDescription(getProfileDetails(profile))
-                .setColor(borderColor(getCurrentForm(profile)));
+                .setColor(borderColor(getCurrentForm(profile)))
+                .addFields({ name: "Power per message", value: getMessagePowerRange() })
+                .setFooter({
+                    text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`,
+                    iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 })
+                });
             await sendTemporary(message.channel, { embeds: [profileEmbed] }, 12500, "profile response");
             return;
         }
@@ -479,8 +603,13 @@ client.on("messageCreate", async (message) => {
             .setColor("#008B8B")
             .addFields(
                 { name: viewerName, value: getProfileDetails(viewerProfile), inline: true },
-                { name: displayName, value: getProfileDetails(profile), inline: true }
-            );
+                { name: displayName, value: getProfileDetails(profile), inline: true },
+                { name: "Power per message", value: getMessagePowerRange() }
+            )
+            .setFooter({
+                text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`,
+                iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 })
+            });
         await sendTemporary(message.channel, { embeds: [comparisonEmbed] }, 12500, "compare response");
         return;
     }
@@ -533,7 +662,9 @@ client.on("messageCreate", async (message) => {
                             ? `God Tier ${data.level - data.godki + 1}`
                             : `Tier ${data.level}`;
                         const currentForm = data.transformationForm || "normal";
-                        const transformationLabel = currentForm === "normal" ? "" : `  •  ${currentForm.toUpperCase()}`;
+                        const transformationLabel = currentForm === "normal"
+                            ? ""
+                            : `  •  ${transformationName(currentForm, data.godki)}`;
                         const powerLevel = formatPowerLevel(data.points * data.transformation);
 
                         return `${rankLabel} <@${data.userID}>\n└ ${tierLabel}${transformationLabel}  •  **${powerLevel}** power`;
@@ -618,7 +749,7 @@ client.on("messageCreate", async (message) => {
         const form = getCurrentForm(user);
         const rule = TRANSFORM_RULES[form];
         if (user.stamina < rule.trainingCost) {
-            return replyTemporary(message, `Not enough stamina to train in ${form.toUpperCase()}. You need ${numeral(rule.trainingCost).format("0,0")} stamina; you have ${numeral(Math.floor(user.stamina)).format("0,0")}.`, 10000, "training stamina response");
+            return replyTemporary(message, `Not enough stamina to train in ${transformationName(form, user.godki)}. You need ${numeral(rule.trainingCost).format("0,0")} stamina; you have ${numeral(Math.floor(user.stamina)).format("0,0")}.`, 10000, "training stamina response");
         }
 
         const rawPower = BASE_TRAINING_POWER * rule.trainingMultiplier;
@@ -640,7 +771,7 @@ client.on("messageCreate", async (message) => {
             .setTitle(`${message.author.username} finished training!`)
             .setDescription(droppedForm
                 ? "The training drained your stamina and forced you to drop a form."
-                : `Training in ${form.toUpperCase()} converted stamina into power.`)
+                : `Training in ${transformationName(form, user.godki)} converted stamina into power.`)
             .setColor("#08ff00")
             .addFields(
                 { name: "Power gained", value: numeral(powerGained).format("0,0"), inline: true },
@@ -674,11 +805,11 @@ client.on("messageCreate", async (message) => {
 
         if (!form || !Object.prototype.hasOwnProperty.call(TRANSFORM_RULES, form)) {
             const invalidTransform = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(getCurrentForm(user))} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+                .setAuthor({ name: `${transformLabel(getCurrentForm(user), user.godki)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setColor("#FF0000")
                 .addFields(
                     { name: "Error!", value: "Additional arguments required!" },
-                    { name: "Valid arguments are:", value: "Normal, SSJ, SSJ2, SSJ3, SSG, SSGSS" }
+                    { name: "Valid arguments are:", value: "`normal` (Normal/Beyond God), `ssj` (Super Saiyan), `ssj2` (Super Saiyan 2), `ssj3` (Super Saiyan 3), `ssg` (Super Saiyan God), `ssgss` (Super Saiyan God Super Saiyan)." }
                 )
                 .setFooter({ text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
@@ -689,7 +820,7 @@ client.on("messageCreate", async (message) => {
         const rule = TRANSFORM_RULES[form];
         if (user.level < rule.minLevel) {
             const lowLevelWarning = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(getCurrentForm(user))} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+                .setAuthor({ name: `${transformLabel(getCurrentForm(user), user.godki)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setColor("#FF0000")
                 .addFields({ name: "Level too low!", value: "Additional power required to transform." });
@@ -715,9 +846,9 @@ client.on("messageCreate", async (message) => {
         const transformedLevel = user.transformation;
         const transformedProgress = getLevelProgress(user);
         const transformEmbed = new EmbedBuilder()
-            .setTitle(form !== "normal" ? `${message.author.username} transformed!` : `${message.author.username} reverted to normal!`)
+            .setTitle(form !== "normal" ? `${message.author.username} transformed!` : `${message.author.username} reverted to ${transformationName(form, user.godki)}!`)
             .setDescription(form !== "normal" ? "Transformations amplify your power depending on the form you choose!" : "You reverted to your base form.")
-            .setAuthor({ name: `${transformLabel(form)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
+            .setAuthor({ name: `${transformLabel(form, user.godki)}${message.member?.displayName || message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
             .setColor(borderColor(form))
             .addFields(

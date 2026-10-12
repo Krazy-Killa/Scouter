@@ -30,11 +30,11 @@ const ACHIEVEMENTS = {
     power_100m: { name: "Legendary", description: "Earn 100 million base power." },
     trained_once: { name: "First Training", description: "Complete your first training session." },
     training_streak_7: { name: "Dedicated", description: "Train on 7 consecutive UTC calendar days." },
-    form_ssj: { name: "Super Saiyan", description: "Transform into SSJ." },
-    form_ssj2: { name: "Ascended Saiyan", description: "Transform into SSJ2." },
-    form_ssj3: { name: "Unleashed Power", description: "Transform into SSJ3." },
-    form_ssg: { name: "Godly Power", description: "Transform into SSG." },
-    form_ssgss: { name: "Beyond Godhood", description: "Transform into SSGSS." }
+    form_ssj: { name: "Super Saiyan", description: "Transform into Super Saiyan." },
+    form_ssj2: { name: "Ascended Saiyan", description: "Transform into Super Saiyan 2." },
+    form_ssj3: { name: "Unleashed Power", description: "Transform into Super Saiyan 3." },
+    form_ssg: { name: "Godly Power", description: "Transform into Super Saiyan God." },
+    form_ssgss: { name: "Beyond Godhood", description: "Transform into Super Saiyan God Super Saiyan." }
 };
 
 function createDefaultUser(authorId, guildId, now = Date.now()) {
@@ -106,11 +106,16 @@ function getTransformationMultiplier(form, godki = 0, godTierLevel = 1) {
         throw new Error(`Unknown transformation form: ${form}`);
     }
     const godKiBase = getGodKiBaseMultiplier(godTierLevel);
+    const ssgMultiplier = getSsgMultiplier(godTierLevel);
     if (godki > 0 && form === "normal") return godKiBase;
-    if (godki > 0 && form === "ssg") return getSsgMultiplier(godTierLevel);
-    if (godki > 0 && form === "ssgss") return getSsgMultiplier(godTierLevel) * 50;
+    if (godki > 0 && form === "ssg") return ssgMultiplier;
+    if (godki > 0 && form === "ssgss") return ssgMultiplier * 50;
     if (godki > 0 && ["ssj", "ssj2", "ssj3"].includes(form)) {
-        return godKiBase * FORM_MULTIPLIERS[form];
+        const ssgShare = { ssj: 1 / 3, ssj2: 2 / 3, ssj3: 3 / 4 }[form];
+        return Math.min(
+            godKiBase * FORM_MULTIPLIERS[form],
+            Math.floor(ssgMultiplier * ssgShare)
+        );
     }
     return FORM_MULTIPLIERS[form];
 }

@@ -87,7 +87,31 @@ For leaderboards with multiple pages, use the left and right reactions beneath t
 | Super Saiyan God | 50 | 2,025,000 | 4,500 | 5 |
 | Super Saiyan God Super Saiyan | 64 | 2,125,000 | 5,000 | 10 |
 
-Transforming into either Super Saiyan God or Super Saiyan God Super Saiyan activates god ki and records the user's current overall level as their starting point: that level becomes God Tier 1. For a user who awakens god ki at overall level 50, overall level 64 is God Tier 15. With god ki, the base form is called Beyond God: its multiplier scales linearly from 1× at God Tier 1 to 400× at God Tier 15. Super Saiyan, Super Saiyan 2, and Super Saiyan 3 scale from their usual 50×, 100×, and 400× Beyond God multipliers, capped at one-third, two-thirds, and three-quarters of the current Super Saiyan God multiplier, respectively. Super Saiyan 3 also drains 15 stamina per eligible message, compared with 5 for Super Saiyan God. Super Saiyan God scales linearly from 20,000× at God Tier 1 to 30,000× at God Tier 15, and Super Saiyan God Super Saiyan is always 50× the current Super Saiyan God multiplier (1,000,000× to 1,500,000×). These god-ki multipliers update as the user gains God Tiers and stop increasing after Tier 15. The two god forms remain unlocked at overall levels 50 and 64, respectively. Stamina is capped at 10,000 and regenerates at 2,000 per day while in base form. When transformed stamina reaches zero, the user drops one form.
+#### Unlocking God Ki
+
+- Super Saiyan God unlocks at overall level 50; Super Saiyan God Super Saiyan unlocks at level 64.
+- Transforming into either form awakens God Ki. Your current overall level becomes God Tier 1.
+- God Tier is based on levels gained after awakening. For example, if you awaken at level 50, level 64 is God Tier 15.
+- God Ki multipliers continue to scale through God Tier 15, then stop increasing.
+
+#### God Ki multipliers
+
+| Form | Multiplier |
+|---|---:|
+| Beyond God (base form) | Scales from 1× at God Tier 1 to 400× at God Tier 15 |
+| Super Saiyan | Up to 50× Beyond God; capped at one-third of Super Saiyan God |
+| Super Saiyan 2 | Up to 100× Beyond God; capped at two-thirds of Super Saiyan God |
+| Super Saiyan 3 | Up to 400× Beyond God; capped at three-quarters of Super Saiyan God |
+| Super Saiyan God | Scales from 20,000× at God Tier 1 to 30,000× at God Tier 15 |
+| Super Saiyan God Super Saiyan | 50× the current Super Saiyan God multiplier (1,000,000×–1,500,000×) |
+
+The caps keep the forms in order: Super Saiyan < Super Saiyan 2 < Super Saiyan 3 < Super Saiyan God.
+
+#### Stamina
+
+- Stamina is capped at 10,000 and regenerates at 2,000 per day while in base form.
+- Each eligible message drains stamina according to the transformation requirements table above. Super Saiyan 3 drains 15 per message; Super Saiyan God drains 5.
+- When stamina reaches zero, you drop one transformation level.
 
 ## Data backup and restore
 

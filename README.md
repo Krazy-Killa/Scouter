@@ -22,29 +22,11 @@ If you do not already have Node.js and npm installed:
 
 From a terminal opened in the Scouter project folder:
 
-1. Install the project dependencies: `npm install`
+1. Install the locked project dependencies: `npm ci`
 2. Copy `.env.example` to `.env` and set your actual Discord token.
 3. Start the bot: `npm start`
 
 Do not commit your real token. Keep `.env` and any local `config.json` out of Git; both are ignored in this repo.
-
-## Commands
-
-Commands use the configured prefix, which defaults to `!`. Set another prefix with `DISCORD_PREFIX` in `.env` or `prefix` in a local `config.json`.
-
-| Command | Usage | Description |
-|---|---|---|
-| `help` | `!help` | Lists the bot's commands. |
-| `info` | `!info` | Shows your tier, displayed power level, current stamina, and progress to the next level. |
-| `leaderboard` | `!leaderboard` | Shows the all-time rankings for the current server, 10 users per page, ordered by displayed power level. Use the left and right reactions to change pages. |
-| `achievements` | `!achievements` | Lists unlocked and locked achievements. |
-| `train` | `!train` | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
-| `transform` | `!transform <form>` | Changes your form. Valid forms: `normal`, `ssj`, `ssj2`, `ssj3`, `ssg`, `ssgss`. |
-| `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's level. Only the server owner can use this command. |
-
-Replace `!` in these examples if you configured a different prefix. The `setlevel` command updates the level only; it does not adjust the user's accumulated power.
-
-For leaderboards with multiple pages, use the left and right reactions beneath the leaderboard to navigate. The controls are available to the person who ran the command for two minutes.
 
 ### Discord permissions and intent
 
@@ -68,6 +50,25 @@ Grant the bot these channel permissions:
 
 The bot also needs the **Message Content Intent** enabled under **Developer Portal → Bot → Privileged Gateway Intents** so it can read command text and award progression for chat messages.
 
+## Commands
+
+Commands use the configured prefix, which defaults to `!`. Set another prefix with `DISCORD_PREFIX` in `.env` or `prefix` in a local `config.json`.
+
+| Command | Usage | Description |
+|---|---|---|
+| `help` | `!help` | Lists the bot's commands. |
+| `info` | `!info` | Shows your tier, displayed power level, current stamina, and progress to the next level. |
+| `leaderboard` | `!leaderboard` | Shows the all-time rankings for the current server, 10 users per page, ordered by displayed power level. Use the left and right reactions to change pages. |
+| `achievements` | `!achievements` | Lists unlocked and locked achievements. |
+| `train` | `!train` | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
+| `transform` | `!transform <form>` | Changes your form. Valid forms: `normal`, `ssj`, `ssj2`, `ssj3`, `ssg`, `ssgss`. |
+| `privacy` | `!privacy optout` or `!privacy optin` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
+| `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's level. Only the server owner can use this command. |
+
+Replace `!` in these examples if you configured a different prefix. The `setlevel` command updates the level only; it does not adjust the user's accumulated power.
+
+For leaderboards with multiple pages, use the left and right reactions beneath the leaderboard to navigate. The controls are available to the person who ran the command for two minutes.
+
 ### Transformation requirements
 
 | Form | Minimum level | Training power | Training stamina cost | Stamina per eligible message |
@@ -80,6 +81,38 @@ The bot also needs the **Message Content Intent** enabled under **Developer Port
 | SSGSS | 64 | 2,125,000 | 5,000 | 10 |
 
 Users who have reached god ki cannot return to the non-god forms. In god ki, `normal` means the 80,000 base god form. Stamina is capped at 10,000 and regenerates at 2,000 per day while in base form. When transformed stamina reaches zero, the user drops one form.
+
+## Data backup and restore
+
+Enmap stores progression and privacy preferences in `data/enmap.sqlite` under the project folder. This folder is intentionally ignored by Git; back it up separately and keep backups private because they contain user progression records.
+
+To make a backup on Windows, stop the bot first so SQLite has closed its files, then copy the entire `data` folder to a safe location. For example, from the project folder in PowerShell:
+
+```powershell
+$backup = Join-Path $env:USERPROFILE ("Scouter-data-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".zip")
+Compress-Archive -Path .\data -DestinationPath $backup
+```
+
+To restore, stop the bot, preserve or rename the existing `data` folder, then extract the chosen backup into the project folder. For example:
+
+```powershell
+Rename-Item .\data .\data-before-restore
+Expand-Archive -Path "$env:USERPROFILE\Scouter-data-YYYYMMDD-HHMMSS.zip" -DestinationPath . -Force
+```
+
+Replace the example timestamp with the backup file's name. Start the bot after extraction completes. Keep the entire `data` folder together rather than restoring only `enmap.sqlite`.
+
+## Tests
+
+Run the progression unit tests with:
+
+```sh
+npm test
+```
+
+## User privacy
+
+Use `!privacy optout` to stop progression tracking in the current server and delete that server's active progression record, including power, training state, and achievements. While opted out, the bot does not process progression commands or ordinary chat for that user. Use `!privacy optin` to resume tracking; a fresh record is created on the user's next chat message. Existing backups may still contain an earlier copy of a deleted record; remove those backup files too if you need to erase that historical copy.
 
 ## Progression and training
 

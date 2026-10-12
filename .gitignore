@@ -7,5 +7,4 @@ config.json
 !.env.example
 data/*
 node_modules/*
-package-lock.json
 points.json

@@ -3,6 +3,21 @@ require("dotenv").config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const numeral = require("numeral");
 const Enmap = require("enmap");
+const {
+    ACHIEVEMENTS,
+    MAX_STAMINA,
+    addExperience,
+    canEarnMessageXp,
+    createDefaultUser,
+    getProgressAchievementIds,
+    getXpRequiredForLevel,
+    initializeUserProgress,
+    normalizeMessage,
+    optInUser,
+    optOutUser,
+    recordMessageXp,
+    recordTrainingDay
+} = require("./progression");
 
 // Local config.json is optional; environment variables take precedence.
 let fileConfig = {};
@@ -15,7 +30,7 @@ try {
 const config = {
     token: process.env.DISCORD_TOKEN || fileConfig.token,
     prefix: process.env.DISCORD_PREFIX || fileConfig.prefix || "!",
-    version: process.env.APP_VERSION || fileConfig.version || "0.2.0",
+    version: process.env.APP_VERSION || fileConfig.version || "0.3.0",
     author: process.env.APP_AUTHOR || fileConfig.author || "Krazy-Killa",
     icon: process.env.APP_ICON || fileConfig.icon || "",
     minsize: Number(process.env.MIN_MSG_SIZE ?? fileConfig.minsize ?? 2)
@@ -35,9 +50,9 @@ const client = new Client({
 });
 
 client.points = new Enmap({ name: "points" });
+client.privacy = new Enmap({ name: "privacy" });
 
 // Progression and stamina balance values. Displayed power still uses lore multipliers.
-const MAX_STAMINA = 10000;
 const STAMINA_REGEN_PER_DAY = 2000;
 const BASE_MESSAGE_XP = 400;
 const MESSAGE_XP_VARIANCE = 200;
@@ -45,30 +60,9 @@ const MESSAGE_LENGTH_BONUS = 0.1;
 const MESSAGE_LENGTH_BONUS_CAP = 200;
 const BASE_TRAINING_POWER = 5000;
 const TRAIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-const BASE_LEVEL_XP = 5000;
-const LEVEL_XP_FACTOR = 3000;
 const STAMINA_REGEN_PER_MS = STAMINA_REGEN_PER_DAY / (24 * 60 * 60 * 1000);
-const XP_COOLDOWN_MS = 60 * 1000;
-const REPEATED_MESSAGE_WINDOW_MS = 10 * 60 * 1000;
 const NEW_USER_NOTICE_INTERVAL_MS = 60 * 1000;
 const newUserNoticeState = new Map();
-
-const ACHIEVEMENTS = {
-    level_10: { name: "Rising Fighter", description: "Reach Tier 10." },
-    level_25: { name: "Elite Warrior", description: "Reach Tier 25." },
-    level_50: { name: "God Ki Awakened", description: "Reach Tier 50." },
-    level_64: { name: "Limit Breaker", description: "Reach Tier 64." },
-    power_1m: { name: "Powerhouse", description: "Earn 1 million base power." },
-    power_10m: { name: "Unstoppable", description: "Earn 10 million base power." },
-    power_100m: { name: "Legendary", description: "Earn 100 million base power." },
-    trained_once: { name: "First Training", description: "Complete your first training session." },
-    training_streak_7: { name: "Dedicated", description: "Train on 7 consecutive UTC calendar days." },
-    form_ssj: { name: "Super Saiyan", description: "Transform into SSJ." },
-    form_ssj2: { name: "Ascended Saiyan", description: "Transform into SSJ2." },
-    form_ssj3: { name: "Unleashed Power", description: "Transform into SSJ3." },
-    form_ssg: { name: "Godly Power", description: "Transform into SSG." },
-    form_ssgss: { name: "Beyond Godhood", description: "Transform into SSGSS." }
-};
 
 // One rule table drives transformation access, training rewards, and stamina usage.
 const TRANSFORM_RULES = {
@@ -113,35 +107,6 @@ function formatPowerLevel(power) {
         : numeral(power).format("0.0a");
 }
 
-function createDefaultUser(authorId, guildId, now = Date.now()) {
-    return {
-        userID: authorId,
-        guildID: guildId,
-        points: 2500,
-        level: 1,
-        transformation: 1,
-        godki: 0,
-        stamina: MAX_STAMINA,
-        staminaUpdatedAt: now,
-        trainLastUsedAt: 0,
-        lastXpAt: 0,
-        lastXpContent: "",
-        lastXpContentAt: 0,
-        achievements: [],
-        trainingStreakDays: 0,
-        lastTrainingDay: null
-    };
-}
-
-function initializeUserProgress(user) {
-    if (!Number.isFinite(user.lastXpAt)) user.lastXpAt = 0;
-    if (typeof user.lastXpContent !== "string") user.lastXpContent = "";
-    if (!Number.isFinite(user.lastXpContentAt)) user.lastXpContentAt = 0;
-    if (!Array.isArray(user.achievements)) user.achievements = [];
-    if (!Number.isFinite(user.trainingStreakDays)) user.trainingStreakDays = 0;
-    if (typeof user.lastTrainingDay !== "string") user.lastTrainingDay = null;
-}
-
 function waitAndDelete(message, ms) {
     if (!message) return;
     setTimeout(async () => {
@@ -177,11 +142,6 @@ async function replyTemporary(message, content, deleteAfterMs, context) {
     }
 }
 
-function getXpRequiredForLevel(level) {
-    // XP is cumulative: the returned value is the amount needed to advance from this level.
-    return level * BASE_LEVEL_XP + LEVEL_XP_FACTOR * level * (level + 1) * (2 * level + 1) / 6;
-}
-
 function getLevelProgress(user) {
     const godLevel = user.godki > 0 ? user.level - user.godki + 1 : 0;
     const currentXp = user.points - 2500;
@@ -214,18 +174,6 @@ function dropTransformation(user) {
 function getCurrentForm(user) {
     if (user.godki > 0 && user.transformation === 80000) return "normal";
     return Object.keys(TRANSFORM_RULES).find((form) => TRANSFORM_RULES[form].target === user.transformation) || "normal";
-}
-
-function addExperience(user, amount) {
-    user.points += amount;
-    let levelsGained = 0;
-
-    while (user.points - 2500 >= getXpRequiredForLevel(user.level)) {
-        user.level += 1;
-        levelsGained += 1;
-    }
-
-    return levelsGained;
 }
 
 // Send one summary even if a large reward crosses several levels.
@@ -267,51 +215,27 @@ function awardAchievements(message, user, achievementIds) {
     sendTemporary(message.channel, { embeds: [achievementEmbed] }, 30000, `achievement notice for user ${user.userID}`);
 }
 
-function getProgressAchievementIds(user) {
-    const achievements = [];
-    for (const level of [10, 25, 50, 64]) {
-        if (user.level >= level) achievements.push(`level_${level}`);
-    }
-    for (const power of [1000000, 10000000, 100000000]) {
-        if (user.points - 2500 >= power) achievements.push(`power_${power / 1000000}m`);
-    }
-    return achievements;
-}
-
-function recordTrainingDay(user, now) {
-    const today = new Date(now).toISOString().slice(0, 10);
-    const previousDay = user.lastTrainingDay
-        ? Date.parse(`${user.lastTrainingDay}T00:00:00.000Z`)
-        : NaN;
-    const todayDate = Date.parse(`${today}T00:00:00.000Z`);
-    const consecutiveDay = Number.isFinite(previousDay) && todayDate - previousDay === 24 * 60 * 60 * 1000;
-
-    user.trainingStreakDays = consecutiveDay ? user.trainingStreakDays + 1 : 1;
-    user.lastTrainingDay = today;
-}
-
 function sendNewUserNotice(guildId, channel, user) {
     let state = newUserNoticeState.get(guildId);
     if (!state) {
-        state = { lastSentAt: 0, pendingCount: 0, timer: null, channel, user };
+        state = { lastSentAt: 0, pendingUserIds: new Set(), timer: null, channel };
         newUserNoticeState.set(guildId, state);
     }
 
-    state.pendingCount += 1;
+    state.pendingUserIds.add(user.id);
     state.channel = channel;
-    state.user = user;
 
     const sendNotice = () => {
-        const addedCount = state.pendingCount;
-        state.pendingCount = 0;
+        const addedCount = state.pendingUserIds.size;
+        state.pendingUserIds.clear();
         state.timer = null;
+        if (addedCount === 0) return;
         state.lastSentAt = Date.now();
 
         const totalTracked = client.points.filterArray((record) => record.guildID === guildId).length;
         const newUserEmbed = new EmbedBuilder()
             .setTitle("New Users Tracked!")
             .setDescription(`Added ${addedCount} new ${addedCount === 1 ? "user" : "users"} to the server's progression records.`)
-            .setThumbnail(state.user.displayAvatarURL({ dynamic: true, size: 256 }))
             .setColor("#08ff00")
             .addFields(
                 { name: "Users added in this update", value: String(addedCount), inline: true },
@@ -329,6 +253,17 @@ function sendNewUserNotice(guildId, channel, user) {
     }
 }
 
+function cancelPendingNewUserNotice(guildId, userId) {
+    const state = newUserNoticeState.get(guildId);
+    if (!state) return;
+
+    state.pendingUserIds.delete(userId);
+    if (state.pendingUserIds.size === 0 && state.timer) {
+        clearTimeout(state.timer);
+        state.timer = null;
+    }
+}
+
 client.on("clientReady", () => {
     console.log(`[NOTICE] Bot has started, with ${client.users.cache.size} users, in ${client.channels.cache.size} channels of ${client.guilds.cache.size} guilds.`);
 });
@@ -336,9 +271,58 @@ client.on("clientReady", () => {
 client.on("messageCreate", async (message) => {
     if (!message.guild || message.author.bot) return;
 
-    // Load or initialize one guild-scoped record, then persist stamina recovery.
     const rightNow = Date.now();
     const key = `${message.guild.id}-${message.author.id}`;
+    const isCommand = message.content.startsWith(config.prefix);
+    const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
+    const command = args.length > 0 ? args.shift().toLowerCase() : null;
+    if (["help", "info", "leaderboard", "achievements", "train", "transform", "setlevel", "privacy"].includes(command)) {
+        waitAndDelete(message, 1500);
+    }
+
+    if (command === "privacy") {
+        const privacyAction = args[0] ? args[0].toLowerCase() : null;
+        if (privacyAction === "optout") {
+            optOutUser(client.privacy, client.points, key);
+            cancelPendingNewUserNotice(message.guild.id, message.author.id);
+            await sendTemporary(
+                message.channel,
+                `Progression tracking is off for you in this server. Your saved progression record has been deleted. Use \`${config.prefix}privacy optin\` to start fresh later.`,
+                30000,
+                "privacy opt-out confirmation"
+            );
+        } else if (privacyAction === "optin") {
+            optInUser(client.privacy, key);
+            await sendTemporary(
+                message.channel,
+                "Progression tracking is on again. A new record will be created when you next chat.",
+                30000,
+                "privacy opt-in confirmation"
+            );
+        } else {
+            await sendTemporary(
+                message.channel,
+                `Use \`${config.prefix}privacy optout\` to disable tracking and delete your saved record, or \`${config.prefix}privacy optin\` to start fresh later.`,
+                30000,
+                "privacy command instructions"
+            );
+        }
+        return;
+    }
+
+    if (client.privacy.get(key)) {
+        if (isCommand) {
+            await replyTemporary(
+                message,
+                `Progression tracking is off for you in this server. Use \`${config.prefix}privacy optin\` to start fresh.`,
+                10000,
+                "opted-out command notice"
+            );
+        }
+        return;
+    }
+
+    // Load or initialize one guild-scoped record, then persist stamina recovery.
     let user = client.points.get(key);
 
     if (!user) {
@@ -351,20 +335,11 @@ client.on("messageCreate", async (message) => {
     recoverStamina(user, rightNow);
     client.points.set(key, user);
 
-    const isCommand = message.content.startsWith(config.prefix);
-    const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
-    const command = args.length > 0 ? args.shift().toLowerCase() : null;
-    if (["help", "info", "leaderboard", "achievements", "train", "transform", "setlevel"].includes(command)) {
-        waitAndDelete(message, 1500);
-    }
-
     if (!isCommand) {
         if (message.content.length < config.minsize) return;
 
-        const normalizedContent = message.content.trim().replace(/\s+/g, " ").toLowerCase();
-        if (rightNow - user.lastXpAt < XP_COOLDOWN_MS) return;
-        if (normalizedContent === user.lastXpContent &&
-            rightNow - user.lastXpContentAt < REPEATED_MESSAGE_WINDOW_MS) return;
+        const normalizedContent = normalizeMessage(message.content);
+        if (!canEarnMessageXp(user, normalizedContent, rightNow)) return;
 
         // Ordinary chat grants progression XP and drains stamina while transformed.
         const form = getCurrentForm(user);
@@ -384,9 +359,7 @@ client.on("messageCreate", async (message) => {
             (BASE_MESSAGE_XP + Math.floor(Math.random() * (MESSAGE_XP_VARIANCE + 1))) * (1 + lengthBonus)
         );
         const levelsGained = addExperience(user, messageXp);
-        user.lastXpAt = rightNow;
-        user.lastXpContent = normalizedContent;
-        user.lastXpContentAt = rightNow;
+        recordMessageXp(user, normalizedContent, rightNow);
         awardAchievements(message, user, getProgressAchievementIds(user));
         client.points.set(key, user);
 
@@ -403,6 +376,7 @@ client.on("messageCreate", async (message) => {
                 { name: `${config.prefix}info`, value: "Displays your current power reading and tier level, and how much more you need to advance to the next tier.", inline: true },
                 { name: `${config.prefix}leaderboard`, value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
                 { name: `${config.prefix}achievements`, value: "Shows your unlocked achievements and progress.", inline: true },
+                { name: `${config.prefix}privacy`, value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
                 { name: `${config.prefix}transform`, value: "Changes your form, which drains stamina as you chat." },
                 { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." }
             )
@@ -684,6 +658,9 @@ client.on("messageCreate", async (message) => {
         if (!Number.isInteger(setLevel) || setLevel < 1) return replyTemporary(message, "Enter a level of 1 or higher.", 10000, "setlevel validation response");
 
         const targetKey = `${message.guild.id}-${userMention.id}`;
+        if (client.privacy.get(targetKey)) {
+            return replyTemporary(message, "That user has opted out of progression tracking.", 10000, "setlevel privacy response");
+        }
         const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
         targetUser.level = setLevel;
         client.points.set(targetKey, targetUser);

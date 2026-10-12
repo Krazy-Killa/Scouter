@@ -1,12 +1,13 @@
 {
   "name": "Powerlevels",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "My own Discord bot",
   "main": "xp.js",
   "author": "Krazy-Killa",
   "private": true,
   "scripts": {
-    "start": "node xp.js"
+    "start": "node xp.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18.0.0"

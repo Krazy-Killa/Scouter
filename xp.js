@@ -40,11 +40,15 @@ const MAX_STAMINA = 10000;
 const STAMINA_REGEN_PER_DAY = 2000;
 const BASE_MESSAGE_XP = 400;
 const MESSAGE_XP_VARIANCE = 200;
+const MESSAGE_LENGTH_BONUS = 0.1;
+const MESSAGE_LENGTH_BONUS_CAP = 200;
 const BASE_TRAINING_POWER = 5000;
 const TRAIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const BASE_LEVEL_XP = 5000;
 const LEVEL_XP_FACTOR = 3000;
 const STAMINA_REGEN_PER_MS = STAMINA_REGEN_PER_DAY / (24 * 60 * 60 * 1000);
+const NEW_USER_NOTICE_INTERVAL_MS = 60 * 1000;
+const newUserNoticeState = new Map();
 
 // One rule table drives transformation access, training rewards, and stamina usage.
 const TRANSFORM_RULES = {
@@ -82,6 +86,12 @@ const transformLabel = (x) => {
     if (x === 8000000) return "SSGSS";
     return "";
 };
+
+function formatPowerLevel(power) {
+    return power < 100000
+        ? numeral(power).format("0,0")
+        : numeral(power).format("0.0a");
+}
 
 function createDefaultUser(authorId, guildId, now = Date.now()) {
     return {
@@ -169,15 +179,56 @@ function sendLevelUp(message, user, levelsGained) {
         .setColor("#08ff00")
         .addFields(
             { name: user.godki > 0 ? ":crossed_swords:New God Tier" : ":crossed_swords:New Tier", value: String(user.godki > 0 ? godLevel : user.level), inline: true },
-            { name: "Powerlevel", value: numeral(user.points * user.transformation).format("0.0a"), inline: true },
+            { name: "Powerlevel", value: formatPowerLevel(user.points * user.transformation), inline: true },
             { name: "Levels gained", value: String(levelsGained), inline: true }
         )
-        .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: config.icon });
+        .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
     message.channel.send({ embeds: [levelUpEmbed] }).then((sent) => waitAndDelete(sent, 30000));
 }
 
-client.on("ready", () => {
+function sendNewUserNotice(guildId, channel, user) {
+    let state = newUserNoticeState.get(guildId);
+    if (!state) {
+        state = { lastSentAt: 0, pendingCount: 0, timer: null, channel, user };
+        newUserNoticeState.set(guildId, state);
+    }
+
+    state.pendingCount += 1;
+    state.channel = channel;
+    state.user = user;
+
+    const sendNotice = () => {
+        const addedCount = state.pendingCount;
+        state.pendingCount = 0;
+        state.timer = null;
+        state.lastSentAt = Date.now();
+
+        const totalTracked = client.points.filterArray((record) => record.guildID === guildId).length;
+        const newUserEmbed = new EmbedBuilder()
+            .setTitle("New Users Tracked!")
+            .setDescription(`Added ${addedCount} new ${addedCount === 1 ? "user" : "users"} to the server's progression records.`)
+            .setThumbnail(state.user.displayAvatarURL({ dynamic: true, size: 256 }))
+            .setColor("#08ff00")
+            .addFields(
+                { name: "Users added in this update", value: String(addedCount), inline: true },
+                { name: "Total users tracked", value: String(totalTracked), inline: true }
+            );
+
+        state.channel.send({ embeds: [newUserEmbed] })
+            .then((sent) => waitAndDelete(sent, 5000))
+            .catch((error) => console.error(`Failed to send new-user notice for guild ${guildId}:`, error));
+    };
+
+    const timeUntilNextNotice = NEW_USER_NOTICE_INTERVAL_MS - (Date.now() - state.lastSentAt);
+    if (timeUntilNextNotice <= 0) {
+        sendNotice();
+    } else if (!state.timer) {
+        state.timer = setTimeout(sendNotice, timeUntilNextNotice);
+    }
+}
+
+client.on("clientReady", () => {
     console.log(`[NOTICE] Bot has started, with ${client.users.cache.size} users, in ${client.channels.cache.size} channels of ${client.guilds.cache.size} guilds.`);
 });
 
@@ -191,18 +242,8 @@ client.on("messageCreate", async (message) => {
 
     if (!user) {
         user = createDefaultUser(message.author.id, message.guild.id, rightNow);
-
-        const newUser = new EmbedBuilder()
-            .setTitle("New User Found!")
-            .setDescription(`Calculating your power ${message.author.username}:`)
-            .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
-            .setColor("#08ff00")
-            .addFields(
-                { name: ":crossed_swords:Your Tier", value: String(user.level), inline: true },
-                { name: "Powerlevel", value: numeral(user.points * user.transformation).format("0.0a"), inline: true }
-            );
-
-        message.channel.send({ embeds: [newUser] }).then((sent) => waitAndDelete(sent, 5000));
+        client.points.set(key, user);
+        sendNewUserNotice(message.guild.id, message.channel, message.author);
     }
 
     recoverStamina(user, rightNow);
@@ -227,7 +268,11 @@ client.on("messageCreate", async (message) => {
             }
         }
 
-        const messageXp = BASE_MESSAGE_XP + Math.floor(Math.random() * (MESSAGE_XP_VARIANCE + 1));
+        const meaningfulLength = [...message.content.replace(/\s/g, "")].length;
+        const lengthBonus = Math.min(meaningfulLength / MESSAGE_LENGTH_BONUS_CAP, 1) * MESSAGE_LENGTH_BONUS;
+        const messageXp = Math.floor(
+            (BASE_MESSAGE_XP + Math.floor(Math.random() * (MESSAGE_XP_VARIANCE + 1))) * (1 + lengthBonus)
+        );
         const levelsGained = addExperience(user, messageXp);
         client.points.set(key, user);
 
@@ -248,7 +293,7 @@ client.on("messageCreate", async (message) => {
                 { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." }
             )
             .setColor("#008B8B")
-            .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: config.icon });
+            .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
         client.points.set(key, user);
         message.channel.send({ embeds: [help] }).then((sent) => waitAndDelete(sent, 30000));
@@ -261,20 +306,20 @@ client.on("messageCreate", async (message) => {
 
         const infoEmbed = new EmbedBuilder()
             .setTitle("Displaying Current Tier & Power")
-            .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: config.icon })
+            .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
             .setColor(borderColor(user.transformation))
             .addFields(
                 { name: user.godki > 0 ? ":crossed_swords:God Tier" : ":crossed_swords:Tier", value: String(user.godki > 0 ? levelInfo.godLevel : user.level), inline: true },
-                { name: "Powerlevel", value: `${numeral((user.points * user.transformation)).format("0.0a")}`, inline: true },
-                { name: "Power per message:", value: `${numeral(BASE_MESSAGE_XP)}–${numeral(BASE_MESSAGE_XP + MESSAGE_XP_VARIANCE)} power.` },
+                { name: "Powerlevel", value: formatPowerLevel(user.points * user.transformation), inline: true },
+                { name: "Power per message:", value: `${numeral(BASE_MESSAGE_XP).format("0,0")}–${numeral(Math.floor((BASE_MESSAGE_XP + MESSAGE_XP_VARIANCE) * (1 + MESSAGE_LENGTH_BONUS))).format("0,0")} power, based on message length.` },
                 { name: "Stamina", value: `${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true }
             );
 
         if (levelInfo.difference <= 0) {
-            infoEmbed.setFooter({ text: "You're about to ascend to the next level! Congratulations!", iconURL: "https://www.stickpng.com/assets/images/5a81af7d9123fa7bcc9b0793.png" });
+            infoEmbed.setFooter({ text: "You're about to ascend to the next level! Congratulations!", iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
         } else {
-            infoEmbed.setFooter({ text: `${numeral(levelInfo.difference).format("0,0")} additional power needed to reach the next tier!`, iconURL: "https://www.stickpng.com/assets/images/5a81af7d9123fa7bcc9b0793.png" });
+            infoEmbed.setFooter({ text: `${numeral(levelInfo.difference).format("0,0")} additional power needed to reach the next tier!`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
         }
 
         message.channel.send({ embeds: [infoEmbed] }).then((sent) => waitAndDelete(sent, 12500));
@@ -288,28 +333,31 @@ client.on("messageCreate", async (message) => {
         const filtered = client.points.filterArray((p) => p.guildID === message.guild.id);
         const sorted = filtered.sort((a, b) => b.points * b.transformation - a.points * a.transformation);
         const top10 = sorted.slice(0, 10);
+        const rankingColumns = [top10.slice(0, 5), top10.slice(5, 10)]
+            .filter((column) => column.length > 0)
+            .map((column, columnIndex) => ({
+                name: columnIndex === 0 ? "Top 5" : "Next 5",
+                value: column.map((data, index) => {
+                    const rank = columnIndex * 5 + index + 1;
+                    const rankLabel = rank <= 3 ? ["🥇", "🥈", "🥉"][rank - 1] : `**${rank}.**`;
+                    const tierLabel = data.godki > 0
+                        ? `God Tier ${data.level - data.godki + 1}`
+                        : `Tier ${data.level}`;
+                    const powerLevel = formatPowerLevel(data.points * data.transformation);
+
+                    return `${rankLabel} <@${data.userID}>\n└ ${tierLabel}  •  **${powerLevel}** power`;
+                }).join("\n\n"),
+                inline: true
+            }));
 
         const embed = new EmbedBuilder()
-            .setTitle(`${message.guild.name} Leaderboard`)
-            .setAuthor({ name: client.user.username, iconURL: client.user.displayAvatarURL({ dynamic: true, size: 256 }) })
-            .setDescription("Our top 10 strongest members!")
-            .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: config.icon })
+            .setTitle("🏆 Power Rankings")
+            .setDescription(`**${message.guild.name}**\nTop ${top10.length} members by current power level.`)
+            .addFields(rankingColumns.length > 0
+                ? rankingColumns
+                : [{ name: "No rankings yet", value: "Start chatting to earn power!" }])
+            .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) })
             .setColor(0x00ae86);
-
-        let i = 0;
-        let ig = 0;
-        for (const data of top10) {
-            const member = client.users.cache.get(data.userID);
-            if (!member) continue;
-
-            if (data.godki > 0) {
-                ig += 1;
-                embed.addFields({ name: `${ig}. ${member.tag}`, value: `**God Tier Level**: ${(data.level - data.godki + 1)}\n**Powerlevel**: ${numeral(data.points * data.transformation).format("0.0a")}`, inline: true });
-            } else {
-                i += 1;
-                embed.addFields({ name: `${i}. ${member.tag}`, value: `**Tier Level**: ${data.level}\n**Powerlevel**: ${numeral(data.points * data.transformation).format("0.0a")}`, inline: true });
-            }
-        }
 
         message.channel.send({ embeds: [embed] }).then((sent) => waitAndDelete(sent, 30000));
         return;
@@ -350,9 +398,9 @@ client.on("messageCreate", async (message) => {
                 { name: "Power gained", value: numeral(powerGained).format("0,0"), inline: true },
                 { name: "Stamina used", value: numeral(rule.trainingCost).format("0,0"), inline: true },
                 { name: "Stamina remaining", value: `${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true },
-                { name: "Current power level", value: numeral(user.points * user.transformation).format("0.0a"), inline: true }
+                { name: "Current power level", value: formatPowerLevel(user.points * user.transformation), inline: true }
             )
-            .setFooter({ text: "Training can be used once every 24 hours." });
+            .setFooter({ text: "Training can be used once every 24 hours.", iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
         message.channel.send({ embeds: [trainingEmbed] });
         sendLevelUp(message, user, levelsGained);
@@ -366,13 +414,13 @@ client.on("messageCreate", async (message) => {
 
         if (!form || !Object.prototype.hasOwnProperty.call(TRANSFORM_RULES, form)) {
             const invalidTransform = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: config.icon })
+                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setColor("#FF0000")
                 .addFields(
                     { name: "Error!", value: "Additional arguments required!" },
                     { name: "Valid arguments are:", value: "Normal, SSJ, SSJ2, SSJ3, SSG, SSGSS" }
                 )
-                .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: config.icon });
+                .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
             message.channel.send({ embeds: [invalidTransform] }).then((sent) => waitAndDelete(sent, 10000));
             return;
@@ -381,7 +429,7 @@ client.on("messageCreate", async (message) => {
         const rule = TRANSFORM_RULES[form];
         if (user.godki > 0 && !rule.allowGod && form !== "ssgss") {
             const godTierWarning = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: config.icon })
+                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setColor("#FF0000")
                 .addFields({ name: "You've ascended to god tier.", value: "These transformations are no longer relevant to you anymore." });
@@ -392,7 +440,7 @@ client.on("messageCreate", async (message) => {
 
         if (user.level < rule.minLevel) {
             const lowLevelWarning = new EmbedBuilder()
-                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: config.icon })
+                .setAuthor({ name: `${transformLabel(user.transformation)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setColor("#FF0000")
                 .addFields({ name: "Level too low!", value: "Additional power required to transform." });
@@ -419,12 +467,12 @@ client.on("messageCreate", async (message) => {
         const transformEmbed = new EmbedBuilder()
             .setTitle(form !== "normal" ? `${message.author.username} transformed!` : `${message.author.username} reverted to normal!`)
             .setDescription(form !== "normal" ? "Transformations amplify your power depending on the form you choose!" : "You reverted to your base form.")
-            .setAuthor({ name: `${transformLabel(transformedLevel)} ${message.author.username}`, iconURL: config.icon })
+            .setAuthor({ name: `${transformLabel(transformedLevel)} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
             .setColor(borderColor(transformedLevel))
             .addFields(
                 { name: user.godki > 0 ? ":crossed_swords:God Tier" : ":crossed_swords:Tier", value: String(user.godki > 0 ? transformedProgress.godLevel : user.level), inline: true },
-                { name: "Powerlevel", value: `${numeral((user.points * transformedLevel)).format("0.0a")}`, inline: true },
+                { name: "Powerlevel", value: formatPowerLevel(user.points * transformedLevel), inline: true },
                 { name: "Progress", value: `${numeral(transformedProgress.difference).format("0,0")} additional power till level up` },
                 { name: "Stamina", value: `${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true }
             );

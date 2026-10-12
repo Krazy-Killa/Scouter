@@ -40,9 +40,10 @@ Users who have reached god ki cannot return to the non-god forms. In god ki, `no
 
 ## Progression and training
 
-- Eligible messages grant 400–600 progression power, independent of transformation. Transformation multipliers remain in effect for displayed power level.
+- Eligible messages grant 400–660 progression power, independent of transformation. The base random award is 400–600; messages earn up to 10% extra based on non-whitespace length, capped at 200 characters. Transformation multipliers remain in effect for displayed power level.
 - The XP required to advance from level `L` is cumulative: `5,000 × L + 3,000 × (L × (L + 1) × (2L + 1) / 6)`. SSGSS remains unlocked at level 64.
 - Messages shorter than the configured minimum size and messages beginning with the command prefix do not grant progression power.
 - Training rewards use form-specific multipliers and penalties, separate from the lore-based displayed power multipliers. Base-form training is the most stamina-efficient option.
+- A user's progression record is created the first time they chat in a server. New-user notices are batched per server and sent no more than once per minute, showing both the number added in that update and the total users tracked.
 
 At 100 eligible messages per day, the current numbers estimate roughly nine months to level 64 for an active user who trains regularly and uses higher forms, then returns to base to recover stamina. Actual timing varies with message eligibility, training use, and stamina management.

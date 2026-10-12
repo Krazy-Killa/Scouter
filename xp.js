@@ -2,7 +2,9 @@ require("dotenv").config();
 
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const numeral = require("numeral");
-const Enmap = require("enmap");
+const Database = require("better-sqlite3");
+const { existsSync } = require("node:fs");
+const { resolve } = require("node:path");
 const {
     ACHIEVEMENTS,
     MAX_STAMINA,
@@ -19,8 +21,11 @@ const {
     optOutUser,
     recordMessageXp,
     recordTrainingDay,
+    setBasePower,
+    setUserLevel,
     setTransformation
 } = require("./progression");
+const { migrateLegacyEnmapData } = require("./enmap-migration");
 
 // Local config.json is optional; environment variables take precedence.
 let fileConfig = {};
@@ -30,10 +35,13 @@ try {
     fileConfig = {};
 }
 
+const packageVersion = require("./package.json").version;
+const COPYRIGHT_NOTICE = "© 2019-2026";
+
 const config = {
     token: process.env.DISCORD_TOKEN || fileConfig.token,
     prefix: process.env.DISCORD_PREFIX || fileConfig.prefix || "!",
-    version: process.env.APP_VERSION || fileConfig.version || "0.4.0",
+    version: process.env.APP_VERSION || packageVersion,
     author: process.env.APP_AUTHOR || fileConfig.author || "Krazy-Killa",
     icon: process.env.APP_ICON || fileConfig.icon || "",
     minsize: Number(process.env.MIN_MSG_SIZE ?? fileConfig.minsize ?? 2)
@@ -51,9 +59,6 @@ const client = new Client({
         GatewayIntentBits.MessageContent
     ]
 });
-
-client.points = new Enmap({ name: "points" });
-client.privacy = new Enmap({ name: "privacy" });
 
 // Progression and stamina balance values. Displayed power still uses lore multipliers.
 const STAMINA_REGEN_PER_DAY = 2000;
@@ -169,6 +174,30 @@ function getCurrentForm(user) {
     return user.transformationForm || "normal";
 }
 
+function createProfileSnapshot(user, now) {
+    const snapshot = { ...user };
+    initializeUserProgress(snapshot);
+    recoverStamina(snapshot, now);
+    return snapshot;
+}
+
+function getProfileDetails(user) {
+    const levelProgress = getLevelProgress(user);
+    const tier = user.godki > 0
+        ? `God Tier ${levelProgress.godLevel}`
+        : `Tier ${user.level}`;
+    return [
+        `**${tier}**`,
+        `Powerlevel: ${formatPowerLevel(user.points * user.transformation)}`,
+        `Form: ${getCurrentForm(user).toUpperCase()}`,
+        `Stamina: ${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`,
+        levelProgress.difference > 0
+            ? `Next tier in: ${numeral(levelProgress.difference).format("0,0")} power`
+            : "Ready to advance to the next tier",
+        `Achievements: ${user.achievements.length} / ${Object.keys(ACHIEVEMENTS).length}`
+    ].join("\n");
+}
+
 // Send one summary even if a large reward crosses several levels.
 function sendLevelUp(message, user, levelsGained) {
     if (levelsGained === 0) return;
@@ -186,7 +215,7 @@ function sendLevelUp(message, user, levelsGained) {
             { name: "Powerlevel", value: formatPowerLevel(user.points * user.transformation), inline: true },
             { name: "Levels gained", value: String(levelsGained), inline: true }
         )
-        .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
+        .setFooter({ text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
     sendTemporary(message.channel, { embeds: [levelUpEmbed] }, 30000, "level-up notice");
 }
@@ -225,7 +254,7 @@ function sendNewUserNotice(guildId, channel, user) {
         if (addedCount === 0) return;
         state.lastSentAt = Date.now();
 
-        const totalTracked = client.points.filterArray((record) => record.guildID === guildId).length;
+        const totalTracked = client.points.filter((record) => record.guildID === guildId).length;
         const newUserEmbed = new EmbedBuilder()
             .setTitle("New Users Tracked!")
             .setDescription(`Added ${addedCount} new ${addedCount === 1 ? "user" : "users"} to the server's progression records.`)
@@ -269,7 +298,7 @@ client.on("messageCreate", async (message) => {
     const isCommand = message.content.startsWith(config.prefix);
     const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
     const command = args.length > 0 ? args.shift().toLowerCase() : null;
-    if (["help", "info", "leaderboard", "achievements", "train", "transform", "revert", "setlevel", "privacy"].includes(command)) {
+    if (["help", "profile", "compare", "leaderboard", "achievements", "train", "transform", "revert", "setlevel", "setpower", "reset", "privacy"].includes(command)) {
         waitAndDelete(message, 1500);
     }
 
@@ -359,51 +388,100 @@ client.on("messageCreate", async (message) => {
         sendLevelUp(message, user, levelsGained);
     }
 
-    const levelInfo = getLevelProgress(user);
-
     // Read-only commands report the user's current progression and guild rankings.
     if (command === "help") {
         const help = new EmbedBuilder()
             .setTitle("Command List")
             .addFields(
-                { name: `${config.prefix}info`, value: "Displays your current power reading and tier level, and how much more you need to advance to the next tier.", inline: true },
+                { name: `${config.prefix}profile [@user]`, value: "Displays your tier, power, form, stamina, progress, and achievements, or another member's profile.", inline: true },
+                { name: `${config.prefix}compare @user`, value: "Compares your progression with another member.", inline: true },
                 { name: `${config.prefix}leaderboard`, value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
                 { name: `${config.prefix}achievements`, value: "Shows your unlocked achievements and progress.", inline: true },
                 { name: `${config.prefix}privacy`, value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
                 { name: `${config.prefix}transform`, value: "Changes your form, which drains stamina as you chat." },
                 { name: `${config.prefix}revert`, value: "Automatically reverts you to your normal form." },
-                { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." }
+                { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." },
+                { name: `${config.prefix}setlevel @user <level>`, value: "Set a member's tier (server owner only)." },
+                { name: `${config.prefix}setpower @user <power>`, value: "Set a member's base power and recalculate their tier (server owner only)." },
+                { name: `${config.prefix}reset @user`, value: "Reset a member's progression to a fresh profile (server owner only)." }
             )
             .setColor("#008B8B")
-            .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
+            .setFooter({ text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
         client.points.set(key, user);
         sendTemporary(message.channel, { embeds: [help] }, 30000, "help response");
         return;
     }
 
-    if (command === "info") {
-        client.points.set(key, user);
-
-        const infoEmbed = new EmbedBuilder()
-            .setTitle("Displaying Current Tier & Power")
-            .setAuthor({ name: `${transformLabel(getCurrentForm(user))} ${message.author.username}`, iconURL: message.author.displayAvatarURL({ extension: "png", size: 64 }) })
-            .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
-            .setColor(borderColor(getCurrentForm(user)))
-            .addFields(
-                { name: user.godki > 0 ? ":crossed_swords:God Tier" : ":crossed_swords:Tier", value: String(user.godki > 0 ? levelInfo.godLevel : user.level), inline: true },
-                { name: "Powerlevel", value: formatPowerLevel(user.points * user.transformation), inline: true },
-                { name: "Power per message:", value: `${numeral(BASE_MESSAGE_XP).format("0,0")}–${numeral(Math.floor((BASE_MESSAGE_XP + MESSAGE_XP_VARIANCE) * (1 + MESSAGE_LENGTH_BONUS))).format("0,0")} power, based on message length.` },
-                { name: "Stamina", value: `${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true }
-            );
-
-        if (levelInfo.difference <= 0) {
-            infoEmbed.setFooter({ text: "You're about to ascend to the next level! Congratulations!", iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
-        } else {
-            infoEmbed.setFooter({ text: `${numeral(levelInfo.difference).format("0,0")} additional power needed to reach the next tier!`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
+    if (command === "profile" || command === "compare") {
+        const targetMember = message.mentions.members.first()
+            || (args[0] ? message.guild.members.cache.get(args[0]) : null);
+        if (command === "profile" && args.length > 0 && !targetMember) {
+            await replyTemporary(message, `Mention a server member or use \`${config.prefix}profile\` to view your own profile.`, 10000, "profile usage response");
+            return;
+        }
+        if (command === "compare" && !targetMember) {
+            await replyTemporary(message, `Mention a server member to compare with. Example: \`${config.prefix}compare @user\`.`, 10000, "compare usage response");
+            return;
+        }
+        if (command === "compare" && targetMember.id === message.author.id) {
+            await replyTemporary(message, "Mention another member to compare your progression.", 10000, "compare self-target response");
+            return;
         }
 
-        sendTemporary(message.channel, { embeds: [infoEmbed] }, 12500, "info response");
+        const targetUser = targetMember ? targetMember.user : message.author;
+        const targetKey = `${message.guild.id}-${targetUser.id}`;
+        if (client.privacy.get(targetKey)) {
+            await replyTemporary(
+                message,
+                "That member has opted out of progression tracking.",
+                10000,
+                `${command} privacy response`
+            );
+            return;
+        }
+
+        const targetRecord = targetUser.id === message.author.id
+            ? user
+            : client.points.get(targetKey);
+        if (!targetRecord) {
+            await replyTemporary(
+                message,
+                "That member doesn't have a progression profile in this server yet.",
+                10000,
+                `${command} missing-profile response`
+            );
+            return;
+        }
+
+        const profile = createProfileSnapshot(targetRecord, rightNow);
+        const displayName = targetMember?.displayName
+            || (targetUser.id === message.author.id ? message.member?.displayName : null)
+            || targetUser.username;
+        if (command === "profile") {
+            const profileEmbed = new EmbedBuilder()
+                .setAuthor({
+                    name: `${transformLabel(getCurrentForm(profile))} ${displayName}`,
+                    iconURL: targetUser.displayAvatarURL({ extension: "png", size: 64 })
+                })
+                .setThumbnail(targetUser.displayAvatarURL({ dynamic: true, size: 256 }))
+                .setTitle("Progression Profile")
+                .setDescription(getProfileDetails(profile))
+                .setColor(borderColor(getCurrentForm(profile)));
+            await sendTemporary(message.channel, { embeds: [profileEmbed] }, 12500, "profile response");
+            return;
+        }
+
+        const viewerProfile = createProfileSnapshot(user, rightNow);
+        const viewerName = message.member?.displayName || message.author.username;
+        const comparisonEmbed = new EmbedBuilder()
+            .setTitle("Progression Comparison")
+            .setColor("#008B8B")
+            .addFields(
+                { name: viewerName, value: getProfileDetails(viewerProfile), inline: true },
+                { name: displayName, value: getProfileDetails(profile), inline: true }
+            );
+        await sendTemporary(message.channel, { embeds: [comparisonEmbed] }, 12500, "compare response");
         return;
     }
 
@@ -436,7 +514,7 @@ client.on("messageCreate", async (message) => {
     if (command === "leaderboard") {
         client.points.set(key, user);
 
-        const filtered = client.points.filterArray((p) => p.guildID === message.guild.id);
+        const filtered = client.points.filter((p) => p.guildID === message.guild.id);
         const sorted = filtered.sort((a, b) => b.points * b.transformation - a.points * a.transformation);
         const pageSize = 10;
         const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
@@ -469,7 +547,7 @@ client.on("messageCreate", async (message) => {
                 .addFields(rankingColumns.length > 0
                     ? rankingColumns
                     : [{ name: "No rankings yet", value: "Start chatting to earn power!" }])
-                .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) })
+                .setFooter({ text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) })
                 .setColor(0x00ae86);
         };
 
@@ -602,7 +680,7 @@ client.on("messageCreate", async (message) => {
                     { name: "Error!", value: "Additional arguments required!" },
                     { name: "Valid arguments are:", value: "Normal, SSJ, SSJ2, SSJ3, SSG, SSGSS" }
                 )
-                .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
+                .setFooter({ text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
 
             sendTemporary(message.channel, { embeds: [invalidTransform] }, 10000, "invalid transformation response");
             return;
@@ -653,34 +731,83 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // Guild-owner-only utility for administrative level adjustments.
-    if (command === "setlevel") {
+    // Guild-owner-only utilities for administrative progression adjustments.
+    if (["setlevel", "setpower", "reset"].includes(command)) {
         const guildOwner = message.guild.ownerId ?? null;
         if (message.author.id !== guildOwner) {
-            return replyTemporary(message, "You're not the boss of me, you can't do that!", 10000, "setlevel permission response");
+            return replyTemporary(message, "Only the server owner can use this progression command.", 10000, `${command} permission response`);
         }
 
         const userMention = message.mentions.users.first() || client.users.cache.get(args[0]);
-        if (!userMention) return replyTemporary(message, "You must mention someone or give their ID!", 10000, "setlevel user response");
-
-        const setLevel = Number.parseInt(args[1], 10);
-        if (!Number.isInteger(setLevel) || setLevel < 1) return replyTemporary(message, "Enter a level of 1 or higher.", 10000, "setlevel validation response");
+        if (!userMention) {
+            return replyTemporary(message, "Mention a server member or provide their user ID.", 10000, `${command} user response`);
+        }
 
         const targetKey = `${message.guild.id}-${userMention.id}`;
         if (client.privacy.get(targetKey)) {
-            return replyTemporary(message, "That user has opted out of progression tracking.", 10000, "setlevel privacy response");
+            return replyTemporary(message, "That user has opted out of progression tracking.", 10000, `${command} privacy response`);
+        }
+
+        if (command === "reset") {
+            if (!client.points.has(targetKey)) {
+                return replyTemporary(message, "That user does not have a progression profile to reset.", 10000, "reset missing-profile response");
+            }
+            client.points.set(targetKey, createDefaultUser(userMention.id, message.guild.id, rightNow));
+            return sendTemporary(message.channel, `${userMention.tag}'s progression has been reset to a fresh profile.`, 10000, "reset confirmation");
+        }
+
+        if (command === "setlevel") {
+            const setLevel = Number(args[1]);
+            if (!Number.isSafeInteger(setLevel) || setLevel < 1) {
+                return replyTemporary(message, "Enter a whole-number level of 1 or higher.", 10000, "setlevel validation response");
+            }
+            const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
+            initializeUserProgress(targetUser);
+            setUserLevel(targetUser, setLevel);
+            client.points.set(targetKey, targetUser);
+            return sendTemporary(message.channel, `${userMention.tag} has been set to Tier ${setLevel}.`, 10000, "setlevel confirmation");
+        }
+
+        const setPower = Number(args[1]?.replaceAll(",", ""));
+        if (!Number.isSafeInteger(setPower) || setPower < 2500) {
+            return replyTemporary(message, "Enter a whole-number base power of at least 2,500.", 10000, "setpower validation response");
         }
         const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
         initializeUserProgress(targetUser);
-        targetUser.level = setLevel;
-        setTransformation(targetUser, targetUser.transformationForm);
+        setBasePower(targetUser, setPower);
         client.points.set(targetKey, targetUser);
-        sendTemporary(message.channel, `${userMention.tag} has been set to ${setLevel}.`, 10000, "setlevel confirmation");
-        return;
+        const tierLabel = targetUser.godki > 0
+            ? `God Tier ${getGodTierLevel(targetUser)}`
+            : `Tier ${targetUser.level}`;
+        return sendTemporary(
+            message.channel,
+            `${userMention.tag}'s base power is now ${numeral(setPower).format("0,0")} (${tierLabel}).`,
+            10000,
+            "setpower confirmation"
+        );
     }
 });
 
 client.on("error", (error) => console.error(error));
 client.on("warn", (warning) => console.warn(warning));
 
-client.login(config.token);
+import("enmap")
+    .then(async ({ default: Enmap }) => {
+        const { stringify } = await import("better-serialize");
+        const databasePath = resolve(process.cwd(), "data", "enmap.sqlite");
+        if (existsSync(databasePath)) {
+            const database = new Database(databasePath);
+            try {
+                migrateLegacyEnmapData(database, stringify);
+            } finally {
+                database.close();
+            }
+        }
+        client.points = new Enmap({ name: "points" });
+        client.privacy = new Enmap({ name: "privacy" });
+        return client.login(config.token);
+    })
+    .catch((error) => {
+        console.error("Failed to initialize Enmap or log in to Discord:", error);
+        process.exitCode = 1;
+    });

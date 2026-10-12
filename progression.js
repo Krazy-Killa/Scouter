@@ -140,6 +140,44 @@ function addExperience(user, amount) {
     return levelsGained;
 }
 
+function updateGodKiForLevel(user) {
+    if (!(user.godki > 0)) return;
+    if (user.level < 50) {
+        user.godki = 0;
+        if (["ssg", "ssgss"].includes(user.transformationForm)) {
+            user.transformationForm = "normal";
+        }
+    } else {
+        user.godki = Math.min(user.godki, user.level);
+    }
+}
+
+function setUserLevel(user, level) {
+    if (!Number.isSafeInteger(level) || level < 1) {
+        throw new RangeError("Level must be a positive safe integer.");
+    }
+    user.level = level;
+    updateGodKiForLevel(user);
+    setTransformation(user, user.transformationForm || "normal");
+}
+
+function setBasePower(user, power) {
+    if (!Number.isSafeInteger(power) || power < 2500) {
+        throw new RangeError("Base power must be a safe integer of at least 2,500.");
+    }
+
+    user.points = power;
+    user.level = 1;
+    let unspentPower = user.points - 2500;
+    while (unspentPower >= getXpRequiredForLevel(user.level)) {
+        unspentPower -= getXpRequiredForLevel(user.level);
+        user.level += 1;
+    }
+
+    updateGodKiForLevel(user);
+    setTransformation(user, user.transformationForm || "normal");
+}
+
 function normalizeMessage(content) {
     return content.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -212,5 +250,7 @@ module.exports = {
     optOutUser,
     recordMessageXp,
     recordTrainingDay,
+    setBasePower,
+    setUserLevel,
     setTransformation
 };

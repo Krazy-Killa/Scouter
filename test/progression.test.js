@@ -18,6 +18,8 @@ const {
     optOutUser,
     recordMessageXp,
     recordTrainingDay,
+    setBasePower,
+    setUserLevel,
     setTransformation
 } = require("../progression");
 
@@ -49,6 +51,67 @@ test("computes level thresholds and grants every crossed level", () => {
     const totalForLevel3 = getXpRequiredForLevel(1) + getXpRequiredForLevel(2);
     assert.equal(addExperience(user, totalForLevel3), 2);
     assert.equal(user.level, 3);
+});
+
+test("sets base power and recalculates the tier from total earned power", () => {
+    const user = createDefaultUser("user", "guild", 0);
+
+    setBasePower(user, 2500 + getXpRequiredForLevel(1));
+    assert.equal(user.points, 10500);
+    assert.equal(user.level, 2);
+
+    setBasePower(user, 2500);
+    assert.equal(user.level, 1);
+});
+
+test("clears God Ki and reverts god forms when set power lowers the tier below 50", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.level = 50;
+    user.godki = 50;
+    setTransformation(user, "ssgss");
+
+    setBasePower(user, 2500);
+
+    assert.equal(user.level, 1);
+    assert.equal(user.godki, 0);
+    assert.equal(user.transformationForm, "normal");
+    assert.equal(user.transformation, 1);
+});
+
+test("clears God Ki when an admin-set level falls below Tier 50", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.level = 50;
+    user.godki = 50;
+    setTransformation(user, "ssg");
+
+    setUserLevel(user, 49);
+
+    assert.equal(user.godki, 0);
+    assert.equal(user.transformationForm, "normal");
+    assert.equal(user.transformation, 1);
+});
+
+test("updates God Tier transformation scaling when set power raises an unlocked user", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.godki = 50;
+    setTransformation(user, "ssg");
+    const powerForGodTierTwo = 2500 + Array.from(
+        { length: 50 },
+        (_, index) => getXpRequiredForLevel(index + 1)
+    ).reduce((total, xp) => total + xp, 0);
+
+    setBasePower(user, powerForGodTierTwo);
+
+    assert.equal(user.level, 51);
+    assert.equal(user.godki, 50);
+    assert.equal(user.transformation, 20714);
+});
+
+test("rejects invalid base power values", () => {
+    const user = createDefaultUser("user", "guild", 0);
+
+    assert.throws(() => setBasePower(user, 2499), /at least 2,500/);
+    assert.throws(() => setBasePower(user, 2500.5), /safe integer/);
 });
 
 test("unlocks progression achievements for attained level and base power", () => {
@@ -163,4 +226,58 @@ test("privacy opt-out deletes progression and opt-in clears the opt-out marker",
 
     optInUser(privacyStore, "guild-user");
     assert.equal(privacyStore.has("guild-user"), false);
+});
+
+test("migrates legacy Enmap JSON values atomically to the Enmap 6 format", async () => {
+    const Database = require("better-sqlite3");
+    const { parse, stringify } = await import("better-serialize");
+    const { migrateLegacyEnmapData } = require("../enmap-migration");
+    const database = new Database(":memory:");
+    database.exec("CREATE TABLE points (key text PRIMARY KEY, value text); CREATE TABLE privacy (key text PRIMARY KEY, value text)");
+    database.prepare("INSERT INTO points (key, value) VALUES (?, ?)").run(
+        "legacy",
+        JSON.stringify({ points: 2500, achievements: [] })
+    );
+    database.prepare("INSERT INTO points (key, value) VALUES (?, ?)").run(
+        "current",
+        stringify({ points: 5000, achievements: [] })
+    );
+    database.prepare("INSERT INTO privacy (key, value) VALUES (?, ?)").run(
+        "legacy-opt-out",
+        JSON.stringify(true)
+    );
+
+    try {
+        migrateLegacyEnmapData(database, stringify);
+        const readValue = database.prepare("SELECT value FROM points WHERE key = ?");
+        assert.deepEqual(parse(readValue.get("legacy").value), { points: 2500, achievements: [] });
+        assert.deepEqual(parse(readValue.get("current").value), { points: 5000, achievements: [] });
+        assert.equal(parse(database.prepare("SELECT value FROM privacy WHERE key = ?").get("legacy-opt-out").value), true);
+    } finally {
+        database.close();
+    }
+});
+
+test("rolls back the Enmap migration when a stored value is invalid", async () => {
+    const Database = require("better-sqlite3");
+    const { stringify } = await import("better-serialize");
+    const { migrateLegacyEnmapData } = require("../enmap-migration");
+    const database = new Database(":memory:");
+    database.exec("CREATE TABLE points (key text PRIMARY KEY, value text); CREATE TABLE privacy (key text PRIMARY KEY, value text)");
+    const legacyValue = JSON.stringify({ points: 2500 });
+    database.prepare("INSERT INTO points (key, value) VALUES (?, ?)").run("user", legacyValue);
+    database.prepare("INSERT INTO privacy (key, value) VALUES (?, ?)").run("invalid", "{");
+
+    try {
+        assert.throws(
+            () => migrateLegacyEnmapData(database, stringify),
+            /Cannot migrate Enmap table "privacy" record 1: stored value is not valid JSON/
+        );
+        assert.equal(
+            database.prepare("SELECT value FROM points WHERE key = ?").get("user").value,
+            legacyValue
+        );
+    } finally {
+        database.close();
+    }
 });

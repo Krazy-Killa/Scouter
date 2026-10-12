@@ -1,5 +1,5 @@
 # Scouter
-Powerleveling bot for Discord.
+An RPG-style Discord progression bot where members earn power through chat and training, unlock Saiyan transformations and god ki, and compete on server leaderboards.
 
 ## Setup
 
@@ -7,7 +7,7 @@ Powerleveling bot for Discord.
 
 If you do not already have Node.js and npm installed:
 
-1. Visit the [official Node.js download page](https://nodejs.org/en/download) and download the **LTS** release for your operating system. npm is included with Node.js; you do not need to install it separately.
+1. Install Node.js 20 or newer from the [official Node.js download page](https://nodejs.org/en/download) for your operating system. npm 10 or newer is required and is included with current Node.js releases; you do not need to install it separately.
 2. Run the installer and keep the option to add Node.js to your PATH enabled, if shown.
 3. Close and reopen your terminal, then check that both tools are available:
 
@@ -25,6 +25,8 @@ From a terminal opened in the Scouter project folder:
 1. Install the locked project dependencies: `npm ci`
 2. Copy `.env.example` to `.env` and set your actual Discord token.
 3. Start the bot: `npm start`
+
+Before the first start after upgrading to Enmap 6, stop the bot and back up the entire `data` folder. Scouter migrates the existing Enmap values to the new serialization format at startup; the migration runs in a SQLite transaction.
 
 Do not commit your real token. Keep `.env` and any local `config.json` out of Git; both are ignored in this repo.
 
@@ -57,16 +59,19 @@ Commands use the configured prefix, which defaults to `!`. Set another prefix wi
 | Command | Usage | Description |
 |---|---|---|
 | `help` | `!help` | Lists the bot's commands. |
-| `info` | `!info` | Shows your tier, displayed power level, current stamina, and progress to the next level. |
+| `profile` | `!profile [@user]` | Shows your tier, displayed power, form, stamina, progress to the next tier, and achievements, or a server member's profile. Profiles are unavailable for members who opted out. |
+| `compare` | `!compare @user` | Compares your tier, displayed power, form, stamina, and achievements with another member. |
 | `leaderboard` | `!leaderboard` | Shows the all-time rankings for the current server, 10 users per page, ordered by displayed power level. Use the left and right reactions to change pages. |
 | `achievements` | `!achievements` | Lists unlocked and locked achievements. |
 | `train` | `!train` | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
 | `transform` | `!transform <form>` | Changes your form. Valid forms: `normal`, `ssj`, `ssj2`, `ssj3`, `ssg`, `ssgss`. |
 | `revert` | `!revert` | Automatically returns you to your normal form (Beyond God if you have god ki). |
 | `privacy` | `!privacy optout` or `!privacy optin` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
-| `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's level. Only the server owner can use this command. |
+| `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's tier without changing their accumulated power. Only the server owner can use this command. Setting the tier below 50 removes God Ki and reverts SSG/SSGSS to normal. |
+| `setpower` | `!setpower @user <power>` or `!setpower <user-id> <power>` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500; only the server owner can use it. Setting power below Tier 50 removes God Ki and reverts SSG/SSGSS to normal. |
+| `reset` | `!reset @user` or `!reset <user-id>` | Resets an existing progression profile to its fresh starting state, including power, tier, form, stamina, training history, cooldowns, and achievements. Only the server owner can use this command. |
 
-Replace `!` in these examples if you configured a different prefix. The `setlevel` command updates the level only; it does not adjust the user's accumulated power.
+Replace `!` in these examples if you configured a different prefix. `setlevel` changes only the tier, while `setpower` changes base power and recalculates the tier. Administrative commands cannot modify a member who opted out of progression tracking.
 
 For leaderboards with multiple pages, use the left and right reactions beneath the leaderboard to navigate. The controls are available to the person who ran the command for two minutes.
 

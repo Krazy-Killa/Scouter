@@ -1,16 +1,19 @@
 {
   "name": "Powerlevels",
-  "version": "0.2",
+  "version": "0.2.0",
   "description": "My own Discord bot",
   "main": "xp.js",
   "author": "Krazy-Killa",
+  "private": true,
+  "scripts": {
+    "start": "node xp.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "better-sqlite-pool": "^0.1.2",
-    "discord.io": "https://github.com/woor/discord.io/tarball/gateway_v6",
-    "discord.js": "^11.4.2",
-    "enmap": "^4.0.6",
-    "enmap-sqlite": "^2.0.5",
-    "numeral": "^2.0.6",
-    "winston": "^3.0.0"
+    "discord.js": "^14.16.3",
+    "enmap": "^5.0.1",
+    "numeral": "^2.0.6"
   }
 }

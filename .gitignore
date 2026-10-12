@@ -2,6 +2,9 @@
 bot.js
 auth.json
 config.json
+.env
+.env.*
+!.env.example
 data/*
 node_modules/*
 package-lock.json

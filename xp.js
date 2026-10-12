@@ -29,6 +29,7 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.MessageContent
     ]
 });
@@ -47,8 +48,27 @@ const TRAIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const BASE_LEVEL_XP = 5000;
 const LEVEL_XP_FACTOR = 3000;
 const STAMINA_REGEN_PER_MS = STAMINA_REGEN_PER_DAY / (24 * 60 * 60 * 1000);
+const XP_COOLDOWN_MS = 60 * 1000;
+const REPEATED_MESSAGE_WINDOW_MS = 10 * 60 * 1000;
 const NEW_USER_NOTICE_INTERVAL_MS = 60 * 1000;
 const newUserNoticeState = new Map();
+
+const ACHIEVEMENTS = {
+    level_10: { name: "Rising Fighter", description: "Reach Tier 10." },
+    level_25: { name: "Elite Warrior", description: "Reach Tier 25." },
+    level_50: { name: "God Ki Awakened", description: "Reach Tier 50." },
+    level_64: { name: "Limit Breaker", description: "Reach Tier 64." },
+    power_1m: { name: "Powerhouse", description: "Earn 1 million base power." },
+    power_10m: { name: "Unstoppable", description: "Earn 10 million base power." },
+    power_100m: { name: "Legendary", description: "Earn 100 million base power." },
+    trained_once: { name: "First Training", description: "Complete your first training session." },
+    training_streak_7: { name: "Dedicated", description: "Train on 7 consecutive UTC calendar days." },
+    form_ssj: { name: "Super Saiyan", description: "Transform into SSJ." },
+    form_ssj2: { name: "Ascended Saiyan", description: "Transform into SSJ2." },
+    form_ssj3: { name: "Unleashed Power", description: "Transform into SSJ3." },
+    form_ssg: { name: "Godly Power", description: "Transform into SSG." },
+    form_ssgss: { name: "Beyond Godhood", description: "Transform into SSGSS." }
+};
 
 // One rule table drives transformation access, training rewards, and stamina usage.
 const TRANSFORM_RULES = {
@@ -103,8 +123,23 @@ function createDefaultUser(authorId, guildId, now = Date.now()) {
         godki: 0,
         stamina: MAX_STAMINA,
         staminaUpdatedAt: now,
-        trainLastUsedAt: 0
+        trainLastUsedAt: 0,
+        lastXpAt: 0,
+        lastXpContent: "",
+        lastXpContentAt: 0,
+        achievements: [],
+        trainingStreakDays: 0,
+        lastTrainingDay: null
     };
+}
+
+function initializeUserProgress(user) {
+    if (!Number.isFinite(user.lastXpAt)) user.lastXpAt = 0;
+    if (typeof user.lastXpContent !== "string") user.lastXpContent = "";
+    if (!Number.isFinite(user.lastXpContentAt)) user.lastXpContentAt = 0;
+    if (!Array.isArray(user.achievements)) user.achievements = [];
+    if (!Number.isFinite(user.trainingStreakDays)) user.trainingStreakDays = 0;
+    if (typeof user.lastTrainingDay !== "string") user.lastTrainingDay = null;
 }
 
 function waitAndDelete(message, ms) {
@@ -187,6 +222,47 @@ function sendLevelUp(message, user, levelsGained) {
     message.channel.send({ embeds: [levelUpEmbed] }).then((sent) => waitAndDelete(sent, 30000));
 }
 
+function awardAchievements(message, user, achievementIds) {
+    const newlyUnlocked = [...new Set(achievementIds)]
+        .filter((id) => ACHIEVEMENTS[id] && !user.achievements.includes(id));
+    if (newlyUnlocked.length === 0) return;
+
+    user.achievements.push(...newlyUnlocked);
+    const achievementEmbed = new EmbedBuilder()
+        .setTitle(newlyUnlocked.length === 1 ? "Achievement Unlocked!" : "Achievements Unlocked!")
+        .setDescription(newlyUnlocked
+            .map((id) => `**${ACHIEVEMENTS[id].name}** — ${ACHIEVEMENTS[id].description}`)
+            .join("\n"))
+        .setThumbnail(message.author.displayAvatarURL({ dynamic: true, size: 256 }))
+        .setColor("#FFD700");
+
+    message.channel.send({ embeds: [achievementEmbed] })
+        .catch((error) => console.error(`Failed to send achievement notice for user ${user.userID}:`, error));
+}
+
+function getProgressAchievementIds(user) {
+    const achievements = [];
+    for (const level of [10, 25, 50, 64]) {
+        if (user.level >= level) achievements.push(`level_${level}`);
+    }
+    for (const power of [1000000, 10000000, 100000000]) {
+        if (user.points - 2500 >= power) achievements.push(`power_${power / 1000000}m`);
+    }
+    return achievements;
+}
+
+function recordTrainingDay(user, now) {
+    const today = new Date(now).toISOString().slice(0, 10);
+    const previousDay = user.lastTrainingDay
+        ? Date.parse(`${user.lastTrainingDay}T00:00:00.000Z`)
+        : NaN;
+    const todayDate = Date.parse(`${today}T00:00:00.000Z`);
+    const consecutiveDay = Number.isFinite(previousDay) && todayDate - previousDay === 24 * 60 * 60 * 1000;
+
+    user.trainingStreakDays = consecutiveDay ? user.trainingStreakDays + 1 : 1;
+    user.lastTrainingDay = today;
+}
+
 function sendNewUserNotice(guildId, channel, user) {
     let state = newUserNoticeState.get(guildId);
     if (!state) {
@@ -246,6 +322,7 @@ client.on("messageCreate", async (message) => {
         sendNewUserNotice(message.guild.id, message.channel, message.author);
     }
 
+    initializeUserProgress(user);
     recoverStamina(user, rightNow);
     client.points.set(key, user);
 
@@ -255,6 +332,11 @@ client.on("messageCreate", async (message) => {
 
     if (!isCommand) {
         if (message.content.length < config.minsize) return;
+
+        const normalizedContent = message.content.trim().replace(/\s+/g, " ").toLowerCase();
+        if (rightNow - user.lastXpAt < XP_COOLDOWN_MS) return;
+        if (normalizedContent === user.lastXpContent &&
+            rightNow - user.lastXpContentAt < REPEATED_MESSAGE_WINDOW_MS) return;
 
         // Ordinary chat grants progression XP and drains stamina while transformed.
         const form = getCurrentForm(user);
@@ -274,6 +356,10 @@ client.on("messageCreate", async (message) => {
             (BASE_MESSAGE_XP + Math.floor(Math.random() * (MESSAGE_XP_VARIANCE + 1))) * (1 + lengthBonus)
         );
         const levelsGained = addExperience(user, messageXp);
+        user.lastXpAt = rightNow;
+        user.lastXpContent = normalizedContent;
+        user.lastXpContentAt = rightNow;
+        awardAchievements(message, user, getProgressAchievementIds(user));
         client.points.set(key, user);
 
         sendLevelUp(message, user, levelsGained);
@@ -288,7 +374,8 @@ client.on("messageCreate", async (message) => {
             .setTitle("Command List")
             .addFields(
                 { name: `${config.prefix}info`, value: "Displays your current power reading and tier level, and how much more you need to advance to the next tier.", inline: true },
-                { name: `${config.prefix}leaderboard`, value: `Shows the current leaderboard for ${message.guild.name}.`, inline: true },
+                { name: `${config.prefix}leaderboard`, value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
+                { name: `${config.prefix}achievements`, value: "Shows your unlocked achievements and progress.", inline: true },
                 { name: `${config.prefix}transform`, value: "Changes your form, which drains stamina as you chat." },
                 { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." }
             )
@@ -326,40 +413,103 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    if (command === "achievements") {
+        const unlocked = new Set(user.achievements);
+        const achievementList = Object.entries(ACHIEVEMENTS)
+            .map(([id, achievement]) => `${unlocked.has(id) ? "🏅" : "🔒"} **${achievement.name}** — ${achievement.description}`)
+            .join("\n");
+        const achievementEmbed = new EmbedBuilder()
+            .setTitle(`${message.author.username}'s Achievements`)
+            .setDescription(achievementList)
+            .setColor("#FFD700")
+            .setFooter({ text: `${user.achievements.length} / ${Object.keys(ACHIEVEMENTS).length} unlocked` });
+
+        message.channel.send({ embeds: [achievementEmbed] }).then((sent) => waitAndDelete(sent, 30000));
+        return;
+    }
+
     if (command === "leaderboard") {
         waitAndDelete(message, 1500);
         client.points.set(key, user);
 
         const filtered = client.points.filterArray((p) => p.guildID === message.guild.id);
         const sorted = filtered.sort((a, b) => b.points * b.transformation - a.points * a.transformation);
-        const top10 = sorted.slice(0, 10);
-        const rankingColumns = [top10.slice(0, 5), top10.slice(5, 10)]
-            .filter((column) => column.length > 0)
-            .map((column, columnIndex) => ({
-                name: columnIndex === 0 ? "Top 5" : "Next 5",
-                value: column.map((data, index) => {
-                    const rank = columnIndex * 5 + index + 1;
-                    const rankLabel = rank <= 3 ? ["🥇", "🥈", "🥉"][rank - 1] : `**${rank}.**`;
-                    const tierLabel = data.godki > 0
-                        ? `God Tier ${data.level - data.godki + 1}`
-                        : `Tier ${data.level}`;
-                    const powerLevel = formatPowerLevel(data.points * data.transformation);
+        const pageSize = 10;
+        const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
 
-                    return `${rankLabel} <@${data.userID}>\n└ ${tierLabel}  •  **${powerLevel}** power`;
-                }).join("\n\n"),
-                inline: true
-            }));
+        const createLeaderboardEmbed = (page) => {
+            const pageStart = (page - 1) * pageSize;
+            const pageEntries = sorted.slice(pageStart, pageStart + pageSize);
+            const rankingColumns = [pageEntries.slice(0, 5), pageEntries.slice(5, 10)]
+                .filter((column) => column.length > 0)
+                .map((column, columnIndex) => ({
+                    name: `Ranks ${pageStart + columnIndex * 5 + 1}–${pageStart + columnIndex * 5 + column.length}`,
+                    value: column.map((data, index) => {
+                        const rank = pageStart + columnIndex * 5 + index + 1;
+                        const rankLabel = rank <= 3 ? ["🥇", "🥈", "🥉"][rank - 1] : `**${rank}.**`;
+                        const tierLabel = data.godki > 0
+                            ? `God Tier ${data.level - data.godki + 1}`
+                            : `Tier ${data.level}`;
+                        const powerLevel = formatPowerLevel(data.points * data.transformation);
 
-        const embed = new EmbedBuilder()
-            .setTitle("🏆 Power Rankings")
-            .setDescription(`**${message.guild.name}**\nTop ${top10.length} members by current power level.`)
-            .addFields(rankingColumns.length > 0
-                ? rankingColumns
-                : [{ name: "No rankings yet", value: "Start chatting to earn power!" }])
-            .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) })
-            .setColor(0x00ae86);
+                        return `${rankLabel} <@${data.userID}>\n└ ${tierLabel}  •  **${powerLevel}** power`;
+                    }).join("\n\n"),
+                    inline: true
+                }));
 
-        message.channel.send({ embeds: [embed] }).then((sent) => waitAndDelete(sent, 30000));
+            return new EmbedBuilder()
+                .setTitle("🏆 Power Rankings")
+                .setDescription(`**${message.guild.name}**\nAll-time power rankings • Page ${page} of ${totalPages} • ${sorted.length} members`)
+                .addFields(rankingColumns.length > 0
+                    ? rankingColumns
+                    : [{ name: "No rankings yet", value: "Start chatting to earn power!" }])
+                .setFooter({ text: `Scouter Bot ${config.version} | © 2019 ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) })
+                .setColor(0x00ae86);
+        };
+
+        const leaderboardMessage = await message.channel.send({ embeds: [createLeaderboardEmbed(1)] });
+        if (totalPages > 1) {
+            const previousPageEmoji = "⬅️";
+            const nextPageEmoji = "➡️";
+            try {
+                await leaderboardMessage.react(previousPageEmoji);
+                await leaderboardMessage.react(nextPageEmoji);
+            } catch (error) {
+                console.error("Failed to add leaderboard pagination reactions:", error);
+                await leaderboardMessage.reply("I couldn't add the page controls. Please check that I have Add Reactions and Read Message History permissions.");
+                return;
+            }
+
+            const collector = leaderboardMessage.createReactionCollector({
+                filter: (reaction, reactor) =>
+                    reactor.id === message.author.id &&
+                    [previousPageEmoji, nextPageEmoji].includes(reaction.emoji.name),
+                time: 120000
+            });
+            let currentPage = 1;
+
+            collector.on("collect", async (reaction, reactor) => {
+                try {
+                    await reaction.users.remove(reactor.id);
+                    currentPage += reaction.emoji.name === nextPageEmoji ? 1 : -1;
+                    if (currentPage < 1 || currentPage > totalPages) {
+                        currentPage -= reaction.emoji.name === nextPageEmoji ? 1 : -1;
+                        return;
+                    }
+                    await leaderboardMessage.edit({ embeds: [createLeaderboardEmbed(currentPage)] });
+                } catch (error) {
+                    console.error("Failed to update paginated leaderboard:", error);
+                    collector.stop("pagination-error");
+                }
+            });
+
+            collector.on("end", () => {
+                leaderboardMessage.reactions.removeAll()
+                    .catch((error) => console.error("Failed to remove leaderboard pagination reactions:", error));
+            });
+        }
+
+        waitAndDelete(leaderboardMessage, totalPages > 1 ? 120000 : 30000);
         return;
     }
 
@@ -380,12 +530,16 @@ client.on("messageCreate", async (message) => {
         const rawPower = BASE_TRAINING_POWER * rule.trainingMultiplier;
         const powerGained = Math.floor(rawPower * (1 - rule.trainingPenalty));
         user.stamina = Math.max(0, user.stamina - rule.trainingCost);
+        recordTrainingDay(user, rightNow);
         user.trainLastUsedAt = rightNow;
         const levelsGained = addExperience(user, powerGained);
 
         const droppedForm = user.stamina === 0 && user.transformation !== getBaseTransformation(user);
         if (droppedForm) dropTransformation(user);
 
+        const trainingAchievements = ["trained_once"];
+        if (user.trainingStreakDays >= 7) trainingAchievements.push("training_streak_7");
+        awardAchievements(message, user, [...trainingAchievements, ...getProgressAchievementIds(user)]);
         client.points.set(key, user);
 
         const trainingEmbed = new EmbedBuilder()
@@ -460,6 +614,7 @@ client.on("messageCreate", async (message) => {
             user.transformation = rule.target;
         }
 
+        if (form !== "normal") awardAchievements(message, user, [`form_${form}`]);
         client.points.set(key, user);
 
         const transformedLevel = user.transformation;

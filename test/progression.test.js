@@ -7,6 +7,7 @@ const {
     canEarnMessageXp,
     createDefaultUser,
     getGodKiBaseMultiplier,
+    getGodTierLevel,
     getSsgMultiplier,
     getProgressAchievementIds,
     getTransformationMultiplier,
@@ -84,28 +85,28 @@ test("initializes new progression fields on existing records", () => {
     assert.equal(legacyUser.lastTrainingDay, null);
 });
 
-test("scales Beyond God and SSG multipliers linearly across God Tier 1 through 64", () => {
+test("scales Beyond God and SSG multipliers linearly across God Tier 1 through 15", () => {
     assert.equal(getGodKiBaseMultiplier(1), 1);
-    assert.equal(getGodKiBaseMultiplier(32), 197);
-    assert.equal(getGodKiBaseMultiplier(64), 400);
+    assert.equal(getGodKiBaseMultiplier(8), 200);
+    assert.equal(getGodKiBaseMultiplier(15), 400);
     assert.equal(getGodKiBaseMultiplier(100), 400);
 
     assert.equal(getSsgMultiplier(1), 20000);
-    assert.equal(getSsgMultiplier(32), 24920);
-    assert.equal(getSsgMultiplier(64), 30000);
+    assert.equal(getSsgMultiplier(8), 25000);
+    assert.equal(getSsgMultiplier(15), 30000);
     assert.equal(getSsgMultiplier(100), 30000);
 });
 
 test("uses tier-scaled multipliers for all god-ki forms", () => {
     assert.equal(getTransformationMultiplier("normal", 1, 1), 1);
     assert.equal(getTransformationMultiplier("ssj", 1, 1), 50);
-    assert.equal(getTransformationMultiplier("ssj2", 1, 64), 40000);
-    assert.equal(getTransformationMultiplier("ssj3", 1, 64), 160000);
-    assert.equal(getTransformationMultiplier("ssg", 1, 64), 30000);
-    assert.equal(getTransformationMultiplier("ssgss", 1, 64), 1500000);
+    assert.equal(getTransformationMultiplier("ssj2", 1, 15), 40000);
+    assert.equal(getTransformationMultiplier("ssj3", 1, 15), 160000);
+    assert.equal(getTransformationMultiplier("ssg", 1, 15), 30000);
+    assert.equal(getTransformationMultiplier("ssgss", 1, 15), 1500000);
     assert.equal(
-        getTransformationMultiplier("ssgss", 1, 32),
-        getTransformationMultiplier("ssg", 1, 32) * 50
+        getTransformationMultiplier("ssgss", 1, 8),
+        getTransformationMultiplier("ssg", 1, 8) * 50
     );
 });
 
@@ -117,7 +118,17 @@ test("updates the active god-ki multiplier when the user gains a God Tier", () =
     assert.equal(user.transformation, 20000);
     assert.equal(addExperience(user, getXpRequiredForLevel(1)), 1);
     assert.equal(user.level, 2);
-    assert.equal(user.transformation, 20158);
+    assert.equal(user.transformation, 20714);
+});
+
+test("maps overall level 50 to God Tier 1 and level 64 to God Tier 15", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.godki = 50;
+    user.level = 50;
+    assert.equal(getGodTierLevel(user), 1);
+
+    user.level = 64;
+    assert.equal(getGodTierLevel(user), 15);
 });
 
 test("preserves transformation identity for all god-ki forms", () => {

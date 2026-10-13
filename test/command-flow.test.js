@@ -220,6 +220,8 @@ test("slash response-send failures produce the interaction error response", asyn
     client.points.set("guild-user", createDefaultUser("user", "guild", 0));
     const fixture = createInteraction("help");
     const originalEditReply = fixture.interaction.editReply;
+    const originalConsoleError = console.error;
+    const loggedErrors = [];
     let firstResponse = true;
     fixture.interaction.editReply = async (payload) => {
         if (firstResponse) {
@@ -229,10 +231,16 @@ test("slash response-send failures produce the interaction error response", asyn
         return originalEditReply(payload);
     };
 
-    await handleInteraction(fixture.interaction);
+    console.error = (...args) => loggedErrors.push(args);
+    try {
+        await handleInteraction(fixture.interaction);
+    } finally {
+        console.error = originalConsoleError;
+    }
 
     assert.match(getResponseText(fixture.sent.at(-1)), /could not complete that command/i);
     assert.ok(fixture.sent.at(-1).payload.embeds?.length);
+    assert.match(loggedErrors[0]?.[0], /Failed to send help response/);
 });
 
 test("slash transform passes five selected helpers to the first Saiyan SSG awakening", async () => {

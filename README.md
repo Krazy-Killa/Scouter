@@ -98,9 +98,9 @@ Only one transformation can be active at a time. Base multipliers shown here app
 
 | Transformation | Unlock requirement | Base multiplier |
 |---|---:|---:|
-| Super Saiyan | Tier 4 | 50× |
-| Super Saiyan 2 | Tier 8 | 100× |
-| Super Saiyan 3 | Tier 16 | 400× |
+| Super Saiyan | Tier 21 | 50× |
+| Super Saiyan 2 | Tier 25 | 100× |
+| Super Saiyan 3 | Tier 33 | 400× |
 | Super Saiyan God | Tier 50 | 20,000×–30,000× |
 | Super Saiyan God Super Saiyan | God Tier 15 | 50× Super Saiyan God |
 
@@ -124,10 +124,10 @@ Kaioken is a universal ability that multiplies your active transformation:
 
 | Kaioken ability | Unlock requirement | Power multiplier |
 |---|---:|---:|
-| Kaioken x2 | Tier 4 | 2× |
-| Kaioken x3 | Tier 8 | 3× |
-| Kaioken x4 | Tier 16 | 4× |
-| Kaioken x10 | Tier 25 | 10× |
+| Kaioken x2 | Tier 2 | 2× |
+| Kaioken x3 | Tier 6 | 3× |
+| Kaioken x4 | Tier 12 | 4× |
+| Kaioken x10 | Tier 20 | 10× |
 
 Activate an unlocked level with `/kaioken level:x2`, `x3`, `x4`, or `x10`; choose `off` to disable it. Kaioken stacks with Super Saiyan God, Super Saiyan God Super Saiyan, Potential Unleashed, and other compatible forms. It cannot be combined with Super Saiyan, Super Saiyan 2, or Super Saiyan 3 because their ki is unstable. If stamina runs out, you drop one Kaioken level at a time before dropping the active transformation.
 

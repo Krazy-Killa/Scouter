@@ -1,4 +1,5 @@
 const { MessageFlags, SlashCommandBuilder } = require("discord.js");
+const { ERROR_RESPONSE_COLOR, toEmbedPayload } = require("./response-embeds");
 
 const TRANSFORM_CHOICES = [
     ["normal", "Normal"],
@@ -118,9 +119,10 @@ function createInteractionContext(interaction) {
     };
     const reportFailure = async (error, context) => {
         try {
-            const response = await interaction.editReply(
-                "Scouter could not complete that command. Please try again shortly."
-            );
+            const response = await interaction.editReply(toEmbedPayload(
+                "Scouter could not complete that command. Please try again shortly.",
+                ERROR_RESPONSE_COLOR
+            ));
             firstResponse = false;
             return response;
         } catch (responseError) {
@@ -155,7 +157,7 @@ function createInteractionContext(interaction) {
 async function handleSlashCommand(interaction, commandHandler) {
     if (!interaction.inGuild()) {
         await interaction.reply({
-            content: "Scouter commands are only available in a server.",
+            ...toEmbedPayload("Scouter commands are only available in a server."),
             flags: MessageFlags.Ephemeral
         });
         return;

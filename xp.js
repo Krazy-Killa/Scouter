@@ -35,6 +35,7 @@ const {
 const { migrateLegacyEnmapData } = require("./enmap-migration");
 const { handleAdminCommand } = require("./commands/admin");
 const { createSlashCommands, handleSlashCommand } = require("./commands/slash-commands");
+const { ERROR_RESPONSE_COLOR, toEmbedPayload } = require("./commands/response-embeds");
 
 // Local config.json is optional; environment variables take precedence.
 let fileConfig = {};
@@ -83,9 +84,9 @@ const newUserNoticeState = new Map();
 const TRANSFORM_RULES = {
     normal: { minLevel: 1, trainingMultiplier: 1, trainingPenalty: 0, trainingCost: 10, messageDrain: 0 },
     beyondgod: { minLevel: 50, setGodKi: true, trainingMultiplier: 1, trainingPenalty: 0, trainingCost: 10, messageDrain: 0 },
-    ssj: { minLevel: 4, trainingMultiplier: 50, trainingPenalty: 0.024, trainingCost: 500, messageDrain: 1 },
-    ssj2: { minLevel: 8, trainingMultiplier: 100, trainingPenalty: 0.04, trainingCost: 1000, messageDrain: 2 },
-    ssj3: { minLevel: 16, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 15 },
+    ssj: { minLevel: 21, trainingMultiplier: 50, trainingPenalty: 0.024, trainingCost: 500, messageDrain: 1 },
+    ssj2: { minLevel: 25, trainingMultiplier: 100, trainingPenalty: 0.04, trainingCost: 1000, messageDrain: 2 },
+    ssj3: { minLevel: 33, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 15 },
     ssg: { minLevel: 50, setGodKi: true, trainingMultiplier: 450, trainingPenalty: 0.1, trainingCost: 4500, messageDrain: 5 },
     ssgss: { minGodTier: 15, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 },
     potential: { minLevelByRace: { human: 16, namekian: 25 }, trainingMultiplier: 250, trainingPenalty: 0.08, trainingCost: 2500, messageDrain: 6 },
@@ -95,10 +96,10 @@ const TRANSFORM_RULES = {
 };
 
 const KAIOKEN_RULES = {
-    2: { command: "x2", minLevel: 4, messageDrain: 2, trainingCost: 250, trainingMultiplier: 10, trainingPenalty: 0.01 },
-    3: { command: "x3", minLevel: 8, messageDrain: 5, trainingCost: 500, trainingMultiplier: 15, trainingPenalty: 0.02 },
-    4: { command: "x4", minLevel: 16, messageDrain: 10, trainingCost: 1000, trainingMultiplier: 20, trainingPenalty: 0.04 },
-    10: { command: "x10", minLevel: 25, messageDrain: 25, trainingCost: 3000, trainingMultiplier: 50, trainingPenalty: 0.1 }
+    2: { command: "x2", minLevel: 2, messageDrain: 2, trainingCost: 250, trainingMultiplier: 10, trainingPenalty: 0.01 },
+    3: { command: "x3", minLevel: 6, messageDrain: 5, trainingCost: 500, trainingMultiplier: 15, trainingPenalty: 0.02 },
+    4: { command: "x4", minLevel: 12, messageDrain: 10, trainingCost: 1000, trainingMultiplier: 20, trainingPenalty: 0.04 },
+    10: { command: "x10", minLevel: 20, messageDrain: 25, trainingCost: 3000, trainingMultiplier: 50, trainingPenalty: 0.1 }
 };
 
 // Presentation helpers for the transformation multiplier.
@@ -154,7 +155,7 @@ function waitAndDelete(message, ms) {
 
 async function sendTemporary(channel, content, deleteAfterMs, context) {
     try {
-        const sentMessage = await channel.send(content);
+        const sentMessage = await channel.send(toEmbedPayload(content));
         if (!channel.isSlashCommandResponse) {
             waitAndDelete(sentMessage, deleteAfterMs);
         }
@@ -170,7 +171,7 @@ async function sendTemporary(channel, content, deleteAfterMs, context) {
 
 async function replyTemporary(message, content, deleteAfterMs, context) {
     try {
-        const reply = await message.reply(content);
+        const reply = await message.reply(toEmbedPayload(content));
         if (!message.isSlashCommand) {
             waitAndDelete(reply, deleteAfterMs);
         }
@@ -202,6 +203,15 @@ function getProgressBar(value, maximum, length = 10) {
     const status = progress >= 2 / 3 ? "🟢" : progress >= 1 / 3 ? "🟡" : "🔴";
     const filledBars = Math.round(progress * length);
     return `${status} ${"▰".repeat(filledBars)}${"▱".repeat(length - filledBars)}`;
+}
+
+function formatCooldownRemaining(milliseconds) {
+    if (milliseconds < 60 * 60 * 1000) {
+        const minutesRemaining = Math.ceil(milliseconds / (60 * 1000));
+        return `about ${minutesRemaining} minute(s)`;
+    }
+    const hoursRemaining = Math.ceil(milliseconds / (60 * 60 * 1000));
+    return `about ${hoursRemaining} hour(s)`;
 }
 
 function getTierProgressDisplay(user) {
@@ -534,7 +544,6 @@ async function handleMessage(message) {
                     .setColor(borderColor(getCurrentForm(scannedUser)))
                     .addFields(
                         { name: "Power reading", value: `⚡ **${formatPowerLevel(scannedUser.points * scannedUser.transformation)}**`, inline: true },
-                        { name: "Base power", value: numeral(scannedUser.points - 2500).format("0,0"), inline: true },
                         { name: "Signal profile", value: `${RACES[scannedUser.race].name} • ${tier} • ${getCurrentFormName(scannedUser)}`, inline: true },
                         { name: "Stamina", value: `${numeral(Math.floor(scannedUser.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true },
                         {
@@ -967,8 +976,7 @@ async function handleMessage(message) {
     if (command === "train") {
         const cooldownRemaining = TRAIN_COOLDOWN_MS - (rightNow - user.trainLastUsedAt);
         if (cooldownRemaining > 0) {
-            const hoursRemaining = Math.ceil(cooldownRemaining / (60 * 60 * 1000));
-            return replyTemporary(message, `You're exhausted from training. Try again in about ${hoursRemaining} hour(s).`, 10000, "training cooldown response");
+            return replyTemporary(message, `You're exhausted from training. Try again in ${formatCooldownRemaining(cooldownRemaining)}.`, 10000, "training cooldown response");
         }
 
         const form = getCurrentForm(user);
@@ -1102,10 +1110,9 @@ async function handleMessage(message) {
                 const cooldownRemaining = GOD_KI_AWAKENING_COOLDOWN_MS
                     - (rightNow - user.lastGodKiAwakeningAttemptAt);
                 if (cooldownRemaining > 0) {
-                    const hoursRemaining = Math.ceil(cooldownRemaining / (60 * 60 * 1000));
                     return replyTemporary(
                         message,
-                        `Your next God Ki awakening attempt is available in about ${hoursRemaining} hour(s).`,
+                        `Your next God Ki awakening attempt is available in ${formatCooldownRemaining(cooldownRemaining)}.`,
                         10000,
                         "God Ki awakening cooldown response"
                     );
@@ -1231,10 +1238,16 @@ client.on("interactionCreate", async (interaction) => {
         console.error(`Failed to handle /${interaction.commandName}:`, error);
         try {
             if (interaction.deferred || interaction.replied) {
-                await interaction.editReply("Scouter could not complete that command. Please try again shortly.");
+                await interaction.editReply(toEmbedPayload(
+                    "Scouter could not complete that command. Please try again shortly.",
+                    ERROR_RESPONSE_COLOR
+                ));
             } else {
                 await interaction.reply({
-                    content: "Scouter could not complete that command. Please try again shortly.",
+                    ...toEmbedPayload(
+                        "Scouter could not complete that command. Please try again shortly.",
+                        ERROR_RESPONSE_COLOR
+                    ),
                     flags: MessageFlags.Ephemeral
                 });
             }

@@ -10,7 +10,8 @@ application commands at startup; initial registration can take some time to
 appear across Discord. See the [README command reference](../README.md#commands)
 for command options and setup. Most replies remain visible in the channel, while
 `/privacy` replies are private to the invoking member. Slash-command replies are
-not automatically deleted.
+not automatically deleted. Scouter formats its messages as embeds for a
+consistent presentation.
 
 ## Chat progression
 

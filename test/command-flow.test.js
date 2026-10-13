@@ -10,6 +10,12 @@ class TestStore extends Map {
     }
 }
 
+function getResponseText(response) {
+    if (typeof response.payload === "string") return response.payload;
+    const embed = response.payload.embeds?.[0];
+    return embed?.data?.description || embed?.description || response.payload.content || "";
+}
+
 function createMessage(content, userId = "user", targetUser = null) {
     const sent = [];
     const replied = [];
@@ -138,7 +144,19 @@ test("slash interaction handles privacy opt-out and responds through the interac
     assert.equal(client.points.has(key), false);
     assert.equal(fixture.interaction.deferred, true);
     assert.deepEqual(fixture.interaction.deferReplyOptions, { flags: MessageFlags.Ephemeral });
-    assert.match(fixture.sent[0].payload, /saved progression record has been deleted/i);
+    assert.ok(fixture.sent[0].payload.embeds?.length);
+    assert.match(getResponseText(fixture.sent[0]), /saved progression record has been deleted/i);
+});
+
+test("slash commands unavailable in DMs respond with an ephemeral embed", async () => {
+    const fixture = createInteraction("help");
+    fixture.interaction.inGuild = () => false;
+
+    await handleInteraction(fixture.interaction);
+
+    assert.ok(fixture.replied[0].payload.embeds?.length);
+    assert.equal(fixture.replied[0].payload.flags, MessageFlags.Ephemeral);
+    assert.match(getResponseText(fixture.replied[0]), /only available in a server/i);
 });
 
 test("slash command responses are not scheduled for deletion", async () => {
@@ -176,7 +194,8 @@ test("slash response-send failures produce the interaction error response", asyn
 
     await handleInteraction(fixture.interaction);
 
-    assert.match(fixture.sent.at(-1).payload, /could not complete that command/i);
+    assert.match(getResponseText(fixture.sent.at(-1)), /could not complete that command/i);
+    assert.ok(fixture.sent.at(-1).payload.embeds?.length);
 });
 
 test("slash transform passes five selected helpers to the first Saiyan SSG awakening", async () => {
@@ -252,6 +271,24 @@ test("scan returns a custom reading when the bot is selected", async () => {
     assert.equal(scanEmbed.data.fields.find((field) => field.name === "Power reading").value, "OVER 9,000!");
     assert.match(scanEmbed.data.fields.find((field) => field.name === "Result").value, /I do the scanning/);
     assert.equal(scanEmbed.data.fields.some((field) => field.value.includes("Progression tracking is enabled")), false);
+});
+
+test("scan shows the effective reading without exposing base power", async () => {
+    const targetUser = {
+        id: "target",
+        username: "target",
+        displayAvatarURL: () => "https://example.invalid/target.png"
+    };
+    const target = createDefaultUser("target", "guild", Date.now());
+    target.points = 12500;
+    client.points.set("guild-target", target);
+    const fixture = createMessage("!scan @target", "viewer", targetUser);
+
+    await handleMessage(fixture.message);
+
+    const fields = fixture.sent[0].payload.embeds[0].data.fields;
+    assert.equal(fields.find((field) => field.name === "Power reading").value, "⚡ **12,500**");
+    assert.equal(fields.some((field) => /base power/i.test(field.name)), false);
 });
 
 test("profile embed groups power, stamina, and progression into readable sections", async () => {
@@ -349,11 +386,13 @@ test("privacy opt-out blocks progression and opt-in starts a fresh record", asyn
     await handleMessage(optOut.message);
     assert.equal(client.privacy.get(key), true);
     assert.equal(client.points.has(key), false);
-    assert.match(optOut.sent[0].payload, /saved progression record has been deleted/i);
+    assert.match(getResponseText(optOut.sent[0]), /saved progression record has been deleted/i);
+    assert.ok(optOut.sent[0].payload.embeds?.length);
 
     const blockedCommand = createMessage("!profile");
     await handleMessage(blockedCommand.message);
-    assert.match(blockedCommand.replied[0].payload, /tracking is off/i);
+    assert.match(getResponseText(blockedCommand.replied[0]), /tracking is off/i);
+    assert.ok(blockedCommand.replied[0].payload.embeds?.length);
     assert.equal(client.points.has(key), false);
 
     const optIn = createMessage("!privacy optin");
@@ -412,8 +451,13 @@ test("Beyond God awakening uses a 12-hour attempt cooldown and escalating pity c
 
     const cooldownAttempt = createMessage("!transform beyondgod");
     await handleMessage(cooldownAttempt.message);
-    assert.match(cooldownAttempt.replied[0].payload, /available in about 12 hour/i);
+    assert.match(getResponseText(cooldownAttempt.replied[0]), /available in about 12 hour/i);
     assert.equal(user.godKiAwakeningAttempts, 1);
+
+    user.lastGodKiAwakeningAttemptAt = Date.now() - (12 * 60 * 60 * 1000 - 45 * 60 * 1000);
+    const minutesRemainingAttempt = createMessage("!transform beyondgod");
+    await handleMessage(minutesRemainingAttempt.message);
+    assert.match(getResponseText(minutesRemainingAttempt.replied[0]), /available in about 45 minute/i);
 
     user.godKiAwakeningAttempts = 4;
     user.lastGodKiAwakeningAttemptAt = Date.now() - 12 * 60 * 60 * 1000;
@@ -436,7 +480,7 @@ test("first Saiyan SSG awakening requires five other persisted Saiyan profiles",
     const missingHelpers = createMessage("!transform ssg");
     await handleMessage(missingHelpers.message);
     assert.equal(saiyan.godki, 0);
-    assert.match(missingHelpers.replied[0].payload, /exactly five other Saiyan helpers/i);
+    assert.match(getResponseText(missingHelpers.replied[0]), /exactly five other Saiyan helpers/i);
 
     const helpers = Array.from({ length: 5 }, (_, index) => ({ id: `saiyan-${index}`, username: `saiyan-${index}` }));
     for (const helper of helpers) {
@@ -464,7 +508,7 @@ test("first Saiyan SSG awakening rejects non-Saiyan helpers", async () => {
     const attempt = createMessage("!transform ssg", "user", helpers);
     await handleMessage(attempt.message);
     assert.equal(saiyan.godki, 0);
-    assert.match(attempt.replied[0].payload, /all five helpers must be Saiyans/i);
+    assert.match(getResponseText(attempt.replied[0]), /all five helpers must be Saiyans/i);
 });
 
 test("high overall level cannot bypass the God Ki awakening requirement", async () => {
@@ -492,7 +536,7 @@ test("users can change race before the lock, and non-Saiyans can awaken universa
 
     const saiyanForm = createMessage("!transform ssj");
     await handleMessage(saiyanForm.message);
-    assert.match(saiyanForm.replied[0].payload, /only available to the appropriate race/i);
+    assert.match(getResponseText(saiyanForm.replied[0]), /only available to the appropriate race/i);
 
     user.level = 4;
     await handleMessage(createMessage("!kaioken x2").message);
@@ -525,12 +569,12 @@ test("race command refuses changes after base power reaches the permanent lock",
 
     assert.equal(user.race, "human");
     assert.equal(user.raceLocked, true);
-    assert.match(attempt.replied[0].payload, /race is locked/i);
+    assert.match(getResponseText(attempt.replied[0]), /race is locked/i);
 });
 
 test("each race can use its own unlocked transformation path", async () => {
     const cases = [
-        ["saiyan", 4, "ssj"],
+        ["saiyan", 21, "ssj"],
         ["human", 16, "potential"],
         ["namekian", 25, "potential"],
         ["frieza", 25, "golden"]
@@ -547,12 +591,36 @@ test("each race can use its own unlocked transformation path", async () => {
     }
 });
 
+test("Saiyan forms unlock after the full Kaioken progression", async () => {
+    const cases = [
+        [21, "ssj"],
+        [25, "ssj2"],
+        [33, "ssj3"]
+    ];
+
+    for (const [tier, form] of cases) {
+        const user = createDefaultUser("user", "guild", 0);
+        user.race = "saiyan";
+        user.level = tier - 1;
+        client.points.set("guild-user", user);
+
+        const lockedAttempt = createMessage(`!transform ${form}`);
+        await handleMessage(lockedAttempt.message);
+        assert.match(lockedAttempt.sent[0].payload.embeds[0].data.fields[0].value, new RegExp(`Reach Tier ${tier}`));
+        assert.equal(user.transformationForm, "normal");
+
+        user.level = tier;
+        await handleMessage(createMessage(`!transform ${form}`).message);
+        assert.equal(user.transformationForm, form);
+    }
+});
+
 test("Kaioken ability is universal and each multiplier unlocks at its configured tier", async () => {
     const cases = [
-        [4, "x2", 2],
-        [8, "x3", 3],
-        [16, "x4", 4],
-        [25, "x10", 10]
+        [2, "x2", 2],
+        [6, "x3", 3],
+        [12, "x4", 4],
+        [20, "x10", 10]
     ];
 
     for (const race of ["saiyan", "human", "namekian", "frieza"]) {
@@ -569,27 +637,27 @@ test("Kaioken ability is universal and each multiplier unlocks at its configured
     }
 });
 
-test("Kaioken x10 remains locked until Tier 25", async () => {
+test("Kaioken x10 remains locked until Tier 20", async () => {
     const user = createDefaultUser("user", "guild", 0);
-    user.level = 24;
+    user.level = 19;
     client.points.set("guild-user", user);
 
     const lockedAttempt = createMessage("!kaioken x10");
     await handleMessage(lockedAttempt.message);
     assert.equal(user.transformationForm, "normal");
-    assert.match(lockedAttempt.replied[0].payload, /Reach Tier 25/);
+    assert.match(getResponseText(lockedAttempt.replied[0]), /Reach Tier 20/);
 
-    user.level = 25;
+    user.level = 20;
     await handleMessage(createMessage("!kaioken x10").message);
     assert.equal(user.kaiokenLevel, 10);
 });
 
 test("Kaioken training consumes its ability stamina cost at each unlocked multiplier", async () => {
     const cases = [
-        [4, "x2", 250],
-        [8, "x3", 500],
-        [16, "x4", 1000],
-        [25, "x10", 3000]
+        [2, "x2", 250],
+        [6, "x3", 500],
+        [12, "x4", 1000],
+        [20, "x10", 3000]
     ];
 
     for (const [level, ability, staminaCost] of cases) {
@@ -603,6 +671,17 @@ test("Kaioken training consumes its ability stamina cost at each unlocked multip
         await handleMessage(createMessage("!train").message);
         assert.equal(user.stamina, 10000 - staminaCost, `${ability} should cost ${staminaCost} stamina to train`);
     }
+});
+
+test("training cooldown reports minutes when less than an hour remains", async () => {
+    const user = createDefaultUser("user", "guild", Date.now());
+    user.trainLastUsedAt = Date.now() - (24 * 60 * 60 * 1000 - 35 * 60 * 1000);
+    client.points.set("guild-user", user);
+
+    const attempt = createMessage("!train");
+    await handleMessage(attempt.message);
+
+    assert.match(getResponseText(attempt.replied[0]), /exhausted from training\. Try again in about 35 minute/i);
 });
 
 test("Kaioken x10 drains 25 stamina per eligible message and drops to x4 when exhausted", async () => {
@@ -668,24 +747,24 @@ test("Kaioken stacks with SSGSS and Potential Unleashed and multiplies stamina c
 test("Kaioken cannot be activated with unstable Super Saiyan forms", async () => {
     const user = createDefaultUser("user", "guild", 0);
     user.race = "saiyan";
-    user.level = 4;
+    user.level = 21;
     client.points.set("guild-user", user);
 
     await handleMessage(createMessage("!transform ssj").message);
     const abilityAttempt = createMessage("!kaioken x2");
     await handleMessage(abilityAttempt.message);
     assert.equal(user.kaiokenLevel, 0);
-    assert.match(abilityAttempt.replied[0].payload, /ki is unstable/i);
+    assert.match(getResponseText(abilityAttempt.replied[0]), /ki is unstable/i);
 
     user.transformationForm = "normal";
     user.transformation = 1;
     await handleMessage(createMessage("!kaioken x2").message);
     const formAttempt = createMessage("!transform ssj2");
-    user.level = 8;
+    user.level = 25;
     await handleMessage(formAttempt.message);
     assert.equal(user.transformationForm, "normal");
     assert.equal(user.kaiokenLevel, 2);
-    assert.match(formAttempt.replied[0].payload, /disable Kaioken first/i);
+    assert.match(getResponseText(formAttempt.replied[0]), /disable Kaioken first/i);
 });
 
 test("leaderboard normalizes and persists legacy god-ki transformation forms", async () => {
@@ -721,7 +800,7 @@ test("non-owners cannot use setlevel, setpower, or reset", async () => {
         const { message, replied } = createMessage(`!${command}`, "not-owner", targetUser);
         await handleMessage(message);
 
-        assert.match(replied[0].payload, /Only the server owner/i);
+        assert.match(getResponseText(replied[0]), /Only the server owner/i);
         assert.equal(client.points.get(targetKey), originalRecord);
         assert.equal(originalRecord.points, 50000);
         assert.equal(originalRecord.level, 3);
@@ -738,13 +817,13 @@ test("server owner can set level, set power, and reset an existing profile", asy
     const setLevel = createMessage("!setlevel @target 10", "owner", targetUser);
     await handleMessage(setLevel.message);
     assert.equal(client.points.get(targetKey).level, 10);
-    assert.match(setLevel.sent[0].payload, /set to Tier 10/);
+    assert.match(getResponseText(setLevel.sent[0]), /set to Tier 10/);
 
     const setPower = createMessage("!setpower @target 10500", "owner", targetUser);
     await handleMessage(setPower.message);
     assert.equal(client.points.get(targetKey).points, 10500);
     assert.equal(client.points.get(targetKey).level, 2);
-    assert.match(setPower.sent[0].payload, /base power is now 10,500/);
+    assert.match(getResponseText(setPower.sent[0]), /base power is now 10,500/);
 
     const reset = createMessage("!reset @target", "owner", targetUser);
     await handleMessage(reset.message);
@@ -753,7 +832,7 @@ test("server owner can set level, set power, and reset an existing profile", asy
     assert.equal(resetRecord.points, 2500);
     assert.equal(resetRecord.level, 1);
     assert.equal(resetRecord.transformationForm, "normal");
-    assert.match(reset.sent[0].payload, /reset to a fresh profile/);
+    assert.match(getResponseText(reset.sent[0]), /reset to a fresh profile/);
 });
 
 test("server owner can award additive power with an optional reason", async () => {
@@ -772,7 +851,7 @@ test("server owner can award additive power with an optional reason", async () =
     assert.equal(client.points.get(targetKey), targetRecord);
     assert.equal(targetRecord.points, 12500);
     assert.equal(targetRecord.level, 2);
-    const confirmation = award.sent.find((response) => typeof response.payload === "string").payload;
+    const confirmation = getResponseText(award.sent.find((response) => getResponseText(response)));
     assert.match(confirmation, /10,000 base power awarded/);
     assert.match(confirmation, /Reason: tournament win/);
 });
@@ -787,7 +866,7 @@ test("awardpower rejects invalid amounts and does not change the profile", async
         const { message, replied } = createMessage(`!awardpower @target ${amount}`, "owner", targetUser);
         await handleMessage(message);
 
-        assert.match(replied[0].payload, /positive whole-number power award/i);
+        assert.match(getResponseText(replied[0]), /positive whole-number power award/i);
         assert.equal(client.points.get(targetKey), targetRecord);
         assert.equal(targetRecord.points, 2500);
     }
@@ -801,13 +880,13 @@ test("non-owners cannot use awardpower and opted-out members cannot receive it",
 
     const unauthorized = createMessage("!awardpower @target 100", "not-owner", targetUser);
     await handleMessage(unauthorized.message);
-    assert.match(unauthorized.replied[0].payload, /Only the server owner/i);
+    assert.match(getResponseText(unauthorized.replied[0]), /Only the server owner/i);
     assert.equal(targetRecord.points, 2500);
 
     client.privacy.set(targetKey, true);
     const optedOut = createMessage("!awardpower @target 100", "owner", targetUser);
     await handleMessage(optedOut.message);
-    assert.match(optedOut.replied[0].payload, /opted out/i);
+    assert.match(getResponseText(optedOut.replied[0]), /opted out/i);
     assert.equal(targetRecord.points, 2500);
 });
 
@@ -832,7 +911,7 @@ test("scan, profile, and compare do not expose opted-out members' records", asyn
     for (const command of ["profile", "compare"]) {
         const lookup = createMessage(`!${command} @target`, "viewer", targetUser);
         await handleMessage(lookup.message);
-        assert.match(lookup.replied[0].payload, /opted out of progression tracking/i);
+        assert.match(getResponseText(lookup.replied[0]), /opted out of progression tracking/i);
         assert.equal(lookup.sent.length, 0);
     }
 });

@@ -268,17 +268,24 @@ function getXpRequiredForLevel(level) {
     return level * BASE_LEVEL_XP + LEVEL_XP_FACTOR * level * (level + 1) * (2 * level + 1) / 6;
 }
 
+function getLevelForPower(power) {
+    let level = 1;
+    const earnedPower = power - 2500;
+    while (earnedPower >= getXpRequiredForLevel(level)) level += 1;
+    return level;
+}
+
 function addExperience(user, amount) {
+    const previousLevel = user.level;
     user.points += amount;
     if (user.points - 2500 >= RACE_LOCK_BASE_POWER) user.raceLocked = true;
     let levelsGained = 0;
-
     while (user.points - 2500 >= getXpRequiredForLevel(user.level)) {
         user.level += 1;
         levelsGained += 1;
     }
 
-    if (levelsGained > 0 && user.godki > 0) {
+    if (user.level !== previousLevel && user.godki > 0) {
         setTransformation(user, user.transformationForm || "normal");
     }
 
@@ -313,13 +320,7 @@ function setBasePower(user, power) {
 
     user.points = power;
     if (user.points - 2500 >= RACE_LOCK_BASE_POWER) user.raceLocked = true;
-    user.level = 1;
-    let unspentPower = user.points - 2500;
-    while (unspentPower >= getXpRequiredForLevel(user.level)) {
-        unspentPower -= getXpRequiredForLevel(user.level);
-        user.level += 1;
-    }
-
+    user.level = getLevelForPower(user.points);
     updateGodKiForLevel(user);
     setTransformation(user, user.transformationForm || "normal");
 }

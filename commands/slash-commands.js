@@ -1,6 +1,10 @@
 const { MessageFlags, SlashCommandBuilder } = require("discord.js");
 const { ERROR_RESPONSE_COLOR, toEmbedPayload } = require("./response-embeds");
 
+const SLASH_COMMAND_COOLDOWN_MS = 5000;
+const slashCommandCooldowns = new Map();
+const PRIVATE_SLASH_COMMANDS = new Set(["privacy", "revert", "transform", "kaioken"]);
+
 const TRANSFORM_CHOICES = [
     ["normal", "Normal"],
     ["beyondgod", "Beyond God"],
@@ -30,11 +34,11 @@ function createSlashCommands() {
         new SlashCommandBuilder().setName("transform").setDescription("Change to an unlocked transformation.")
             .addStringOption((option) => option.setName("form").setDescription("Transformation to use").setRequired(true)
                 .addChoices(...TRANSFORM_CHOICES.map(([value, name]) => ({ name, value }))))
-            .addUserOption((option) => option.setName("helper1").setDescription("Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper2").setDescription("Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper3").setDescription("Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper4").setDescription("Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper5").setDescription("Saiyan helper for your first SSG awakening")),
+            .addUserOption((option) => option.setName("helper1").setDescription("Distinct Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper2").setDescription("Distinct Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper3").setDescription("Distinct Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper4").setDescription("Distinct Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper5").setDescription("Distinct Saiyan helper for your first SSG awakening")),
         new SlashCommandBuilder().setName("kaioken").setDescription("Activate or disable Kaioken.")
             .addStringOption((option) => option.setName("level").setDescription("Kaioken multiplier")
                 .setRequired(true)
@@ -163,7 +167,29 @@ async function handleSlashCommand(interaction, commandHandler) {
         return;
     }
 
-    const replyOptions = interaction.commandName === "privacy"
+    const now = Date.now();
+    const userId = interaction.user.id;
+    const lastUsedAt = slashCommandCooldowns.get(userId);
+    const cooldownRemaining = lastUsedAt === undefined
+        ? 0
+        : SLASH_COMMAND_COOLDOWN_MS - (now - lastUsedAt);
+    if (cooldownRemaining > 0) {
+        const secondsRemaining = Math.ceil(cooldownRemaining / 1000);
+        await interaction.reply({
+            ...toEmbedPayload(`Please wait ${secondsRemaining} second(s) before using another slash command.`),
+            flags: MessageFlags.Ephemeral
+        });
+        return;
+    }
+
+    slashCommandCooldowns.set(userId, now);
+    if (slashCommandCooldowns.size > 1000) {
+        for (const [id, usedAt] of slashCommandCooldowns) {
+            if (now - usedAt >= SLASH_COMMAND_COOLDOWN_MS) slashCommandCooldowns.delete(id);
+        }
+    }
+
+    const replyOptions = PRIVATE_SLASH_COMMANDS.has(interaction.commandName)
         ? { flags: MessageFlags.Ephemeral }
         : undefined;
     await interaction.deferReply(replyOptions);
@@ -172,5 +198,6 @@ async function handleSlashCommand(interaction, commandHandler) {
 
 module.exports = {
     createSlashCommands,
-    handleSlashCommand
+    handleSlashCommand,
+    slashCommandCooldowns
 };

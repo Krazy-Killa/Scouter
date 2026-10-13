@@ -68,7 +68,7 @@ create command messages, and bot responses are not automatically deleted.
 | `/leaderboard` | — | Shows all-time server rankings, 10 users per page, ordered by displayed power. Use the left and right reactions to change pages. |
 | `/achievements` | — | Lists unlocked and locked achievements. |
 | `/train` | — | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
-| `/transform` | Required `form`; optional `helper1`–`helper5` | Changes to an unlocked racial or universal transformation. Select five other Saiyan helpers for a first-time SSG awakening. |
+| `/transform` | Required `form`; optional `helper1`–`helper5` | Changes to an unlocked racial or universal transformation. Select five distinct other Saiyan helpers for a first-time SSG awakening. |
 | `/kaioken` | Required `level` | Activates x2/x3/x4/x10 or disables the universal Kaioken ability. |
 | `/revert` | — | Automatically returns you to your normal form (Beyond God if you have God Ki). |
 | `/race` | Required `race` | Changes your race while your base power is below 1,000,000. Race changes permanently lock at that threshold. |
@@ -110,14 +110,14 @@ To awaken God Ki through your first Super Saiyan God transformation, choose five
 
 | Transformation | Unlock requirement | Base multiplier |
 |---|---:|---:|
-| Giant Namekian | Tier 8 | 50× |
+| Giant Namekian | Tier 21 | 50× |
 | Potential Unleashed | Tier 25 | 250× |
 
 #### Frieza Race
 
 | Transformation | Unlock requirement | Base multiplier |
 |---|---:|---:|
-| Final Form | Tier 8 | 50× |
+| Final Form | Tier 21 | 50× |
 | Golden Form | Tier 25 | 400× |
 
 Kaioken is a universal ability that multiplies your active transformation:
@@ -134,7 +134,7 @@ Activate an unlocked level with `/kaioken level:x2`, `x3`, `x4`, or `x10`; choos
 #### Universal God Ki
 
 - Any race can attempt to awaken God Ki at Tier 50 with `/transform form:beyondgod`. Awakening is not guaranteed: you get one attempt every 12 hours, with a 5% chance for each of your first four attempts. After four failures, the chance doubles each attempt: 10%, 20%, 40%, 80%, then 100%.
-- Saiyans can instead awaken God Ki by transforming into Super Saiyan God for the first time. This requires five other players with existing Saiyan progression profiles; select them in the helper options of `/transform form:ssg`. Later SSG transformations do not require helpers.
+- Saiyans can instead awaken God Ki by transforming into Super Saiyan God for the first time. This requires five distinct other players with existing Saiyan progression profiles; select them in the helper options of `/transform form:ssg`. Later SSG transformations do not require helpers.
 - Awakening sets the current overall level as God Tier 1. God Tier continues to increase with levels, while God Ki multipliers stop scaling after God Tier 15.
 - Beyond God is the shared base form for all races after awakening. God Tier scales Beyond God from 1× to 400×.
 - God Tier also scales Kaioken and each race's forms by the Beyond God multiplier. Saiyan Super Saiyan forms retain their existing caps below Super Saiyan God; Super Saiyan God and Super Saiyan God Super Saiyan remain Saiyan-only.
@@ -203,6 +203,7 @@ Progression commands may post profile or scan details in the channel where they 
 
 ## Progression and training
 
+- Power readings use uppercase `K`, `M`, `B`, and `T` suffixes for thousands, millions, billions, and trillions; base and displayed power use the same shorthand.
 - Eligible messages grant 400–660 progression power, independent of transformation. The base random award is 400–600; messages earn up to 10% extra based on non-whitespace length, capped at 200 characters. Transformation multipliers remain in effect for displayed power level.
 - To reduce chat spam, only one message per user can earn power every 60 seconds. Repeating the same normalized message within 10 minutes of its last power award does not earn power.
 - The XP required to advance from level `L` is cumulative: `5,000 × L + 3,000 × (L × (L + 1) × (2L + 1) / 6)`. Super Saiyan God Super Saiyan requires God Tier 15; the overall level where it unlocks depends on when God Ki was awakened.

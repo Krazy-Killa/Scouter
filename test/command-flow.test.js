@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { MessageFlags } = require("discord.js");
 const { client, handleInteraction, handleMessage, SLASH_COMMANDS } = require("../xp");
 const { createDefaultUser } = require("../progression");
+const { slashCommandCooldowns } = require("../commands/slash-commands");
 
 class TestStore extends Map {
     filter(predicate) {
@@ -117,6 +118,7 @@ test.beforeEach(() => {
     client.points = new TestStore();
     client.privacy = new TestStore();
     client.user = { displayAvatarURL: () => "https://example.invalid/bot.png" };
+    slashCommandCooldowns.clear();
 });
 
 test("registers the complete guild-only slash command set", () => {
@@ -157,6 +159,41 @@ test("slash commands unavailable in DMs respond with an ephemeral embed", async 
     assert.ok(fixture.replied[0].payload.embeds?.length);
     assert.equal(fixture.replied[0].payload.flags, MessageFlags.Ephemeral);
     assert.match(getResponseText(fixture.replied[0]), /only available in a server/i);
+});
+
+test("slash commands have a per-user five-second cooldown with a private remaining-time notice", async () => {
+    client.points.set("guild-user", createDefaultUser("user", "guild", 0));
+    const originalNow = Date.now;
+    let now = 10000;
+    Date.now = () => now;
+
+    try {
+        const first = createInteraction("help");
+        await handleInteraction(first.interaction);
+        assert.equal(first.sent.length, 1);
+
+        const blocked = createInteraction("scan");
+        await handleInteraction(blocked.interaction);
+        assert.equal(blocked.interaction.deferred, undefined);
+        assert.equal(blocked.replied[0].payload.flags, MessageFlags.Ephemeral);
+        assert.match(getResponseText(blocked.replied[0]), /wait 5 second\(s\)/i);
+
+        now += 2500;
+        const stillBlocked = createInteraction("scan");
+        await handleInteraction(stillBlocked.interaction);
+        assert.match(getResponseText(stillBlocked.replied[0]), /wait 3 second\(s\)/i);
+
+        now += 2500;
+        const available = createInteraction("help");
+        await handleInteraction(available.interaction);
+        assert.equal(available.sent.length, 1);
+
+        const otherUser = createInteraction("help", {}, "other-user");
+        await handleInteraction(otherUser.interaction);
+        assert.equal(otherUser.sent.length, 1);
+    } finally {
+        Date.now = originalNow;
+    }
 });
 
 test("slash command responses are not scheduled for deletion", async () => {
@@ -220,8 +257,56 @@ test("slash transform passes five selected helpers to the first Saiyan SSG awake
 
     await handleInteraction(fixture.interaction);
 
+    assert.deepEqual(fixture.interaction.deferReplyOptions, { flags: MessageFlags.Ephemeral });
     assert.equal(saiyan.godki, 50);
     assert.equal(saiyan.transformationForm, "ssg");
+});
+
+test("slash revert and Kaioken replies are only visible to the invoking user", async () => {
+    const kaiokenUser = createDefaultUser("kaioken-user", "guild", 0);
+    kaiokenUser.level = 2;
+    client.points.set("guild-kaioken-user", kaiokenUser);
+    const kaioken = createInteraction("kaioken", { level: "x2" }, "kaioken-user");
+    await handleInteraction(kaioken.interaction);
+
+    assert.deepEqual(kaioken.interaction.deferReplyOptions, { flags: MessageFlags.Ephemeral });
+    assert.equal(kaiokenUser.kaiokenLevel, 2);
+    assert.ok(kaioken.sent.length > 0);
+
+    const revertUser = createDefaultUser("revert-user", "guild", 0);
+    client.points.set("guild-revert-user", revertUser);
+    const revert = createInteraction("revert", {}, "revert-user");
+    await handleInteraction(revert.interaction);
+
+    assert.deepEqual(revert.interaction.deferReplyOptions, { flags: MessageFlags.Ephemeral });
+    assert.ok(revert.sent.length > 0);
+});
+
+test("slash transform requires five distinct helpers for the first Saiyan SSG awakening", async () => {
+    const saiyan = createDefaultUser("user", "guild", 0);
+    saiyan.race = "saiyan";
+    saiyan.level = 50;
+    client.points.set("guild-user", saiyan);
+
+    const helper = { id: "helper", username: "helper" };
+    const helperProfile = createDefaultUser(helper.id, "guild", 0);
+    helperProfile.race = "saiyan";
+    client.points.set(`guild-${helper.id}`, helperProfile);
+
+    const fixture = createInteraction("transform", {
+        form: "ssg",
+        helper1: helper,
+        helper2: helper,
+        helper3: helper,
+        helper4: helper,
+        helper5: helper
+    });
+
+    await handleInteraction(fixture.interaction);
+
+    assert.equal(saiyan.godki, 0);
+    assert.notEqual(saiyan.transformationForm, "ssg");
+    assert.match(getResponseText(fixture.sent[0]), /exactly five distinct other Saiyan helpers/i);
 });
 
 test("slash owner control resolves its selected target and string power option", async () => {
@@ -287,7 +372,7 @@ test("scan shows the effective reading without exposing base power", async () =>
     await handleMessage(fixture.message);
 
     const fields = fixture.sent[0].payload.embeds[0].data.fields;
-    assert.equal(fields.find((field) => field.name === "Power reading").value, "⚡ **12,500**");
+    assert.equal(fields.find((field) => field.name === "Power reading").value, "⚡ **12.5K**");
     assert.equal(fields.some((field) => /base power/i.test(field.name)), false);
 });
 
@@ -308,10 +393,10 @@ test("profile embed groups power, stamina, and progression into readable section
     assert.deepEqual(embed.data.fields.map((field) => field.name), [
         "⚡ Power · Base → Form", "💪 Stamina", "📈 Progress"
     ]);
-    assert.equal(embed.data.fields[0].value, "10,000 → 12,500");
+    assert.equal(embed.data.fields[0].value, "10K → 12.5K");
     assert.match(embed.data.fields[1].value, /7,500 \/ 10,000/);
     assert.ok(embed.data.fields[1].value.includes(`🟢 ${"▰".repeat(8)}${"▱".repeat(2)}\n7,500 / 10,000`));
-    assert.ok(embed.data.fields[2].value.includes(`🔴 ▰${"▱".repeat(9)}\n2,000 / 17,000 (12%)\n15,000 power needed`));
+    assert.ok(embed.data.fields[2].value.includes(`🔴 ▰${"▱".repeat(9)}\n2K / 17K (12%)\n15K power needed`));
     assert.match(embed.data.fields[2].value, /Achievements:\*\* 1 \/ 20/);
 });
 
@@ -345,12 +430,12 @@ test("compare embed presents both profiles in matching organized columns", async
     assert.deepEqual(embed.data.fields.map((field) => field.name), ["user", "target"]);
     assert.equal(embed.data.fields[0].inline, true);
     assert.equal(embed.data.fields[1].inline, true);
-    assert.match(embed.data.fields[0].value, /\*\*Tier 2 · Human\*\*[\s\S]*\*\*⚡ Power · Base → Form\*\*[\s\S]*10,000 → 12,500[\s\S]*\*\*💪 Stamina\*\*[\s\S]*7,500 \/ 10,000[\s\S]*\*\*📈 Progress\*\*[\s\S]*2,000 \/ 17,000 \(12%\)[\s\S]*Achievements · 1 \/ 20/);
-    assert.match(embed.data.fields[1].value, /\*\*Tier 2 · Human\*\*[\s\S]*20,000 → 22,500[\s\S]*\*\*💪 Stamina\*\*[\s\S]*5,000 \/ 10,000[\s\S]*12,000 \/ 17,000 \(71%\)/);
+    assert.match(embed.data.fields[0].value, /\*\*Tier 2 · Human\*\*[\s\S]*\*\*⚡ Power · Base → Form\*\*[\s\S]*10K → 12\.5K[\s\S]*\*\*💪 Stamina\*\*[\s\S]*7,500 \/ 10,000[\s\S]*\*\*📈 Progress\*\*[\s\S]*2K \/ 17K \(12%\)[\s\S]*Achievements · 1 \/ 20/);
+    assert.match(embed.data.fields[1].value, /\*\*Tier 2 · Human\*\*[\s\S]*20K → 22\.5K[\s\S]*\*\*💪 Stamina\*\*[\s\S]*5,000 \/ 10,000[\s\S]*12K \/ 17K \(71%\)/);
     assert.ok(embed.data.fields[0].value.includes(`🟢 ${"▰".repeat(8)}${"▱".repeat(2)}\n7,500 / 10,000`));
-    assert.ok(embed.data.fields[0].value.includes(`🔴 ▰${"▱".repeat(9)}\n2,000 / 17,000 (12%)`));
+    assert.ok(embed.data.fields[0].value.includes(`🔴 ▰${"▱".repeat(9)}\n2K / 17K (12%)`));
     assert.ok(embed.data.fields[1].value.includes(`🟡 ${"▰".repeat(5)}${"▱".repeat(5)}\n5,000 / 10,000`));
-    assert.ok(embed.data.fields[1].value.includes(`🟢 ${"▰".repeat(7)}${"▱".repeat(3)}\n12,000 / 17,000 (71%)`));
+    assert.ok(embed.data.fields[1].value.includes(`🟢 ${"▰".repeat(7)}${"▱".repeat(3)}\n12K / 17K (71%)`));
 });
 
 test("chat progression enforces cooldowns and repeated-message protection", async () => {
@@ -480,7 +565,7 @@ test("first Saiyan SSG awakening requires five other persisted Saiyan profiles",
     const missingHelpers = createMessage("!transform ssg");
     await handleMessage(missingHelpers.message);
     assert.equal(saiyan.godki, 0);
-    assert.match(getResponseText(missingHelpers.replied[0]), /exactly five other Saiyan helpers/i);
+    assert.match(getResponseText(missingHelpers.replied[0]), /exactly five distinct other Saiyan helpers/i);
 
     const helpers = Array.from({ length: 5 }, (_, index) => ({ id: `saiyan-${index}`, username: `saiyan-${index}` }));
     for (const helper of helpers) {
@@ -575,8 +660,10 @@ test("race command refuses changes after base power reaches the permanent lock",
 test("each race can use its own unlocked transformation path", async () => {
     const cases = [
         ["saiyan", 21, "ssj"],
-        ["human", 16, "potential"],
+        ["human", 21, "potential"],
+        ["namekian", 21, "giant"],
         ["namekian", 25, "potential"],
+        ["frieza", 21, "final"],
         ["frieza", 25, "golden"]
     ];
 
@@ -588,6 +675,28 @@ test("each race can use its own unlocked transformation path", async () => {
 
         await handleMessage(createMessage(`!transform ${form}`).message);
         assert.equal(user.transformationForm, form, `${race} should be able to use ${form}`);
+    }
+});
+
+test("non-Saiyan transformations unlock on the matching Saiyan tier steps", async () => {
+    const cases = [
+        ["human", 20, "potential", 21],
+        ["namekian", 20, "giant", 21],
+        ["namekian", 24, "potential", 25],
+        ["frieza", 20, "final", 21],
+        ["frieza", 24, "golden", 25]
+    ];
+
+    for (const [race, level, form, unlockTier] of cases) {
+        const user = createDefaultUser("user", "guild", 0);
+        user.race = race;
+        user.level = level;
+        client.points.set("guild-user", user);
+
+        const lockedAttempt = createMessage(`!transform ${form}`);
+        await handleMessage(lockedAttempt.message);
+        assert.match(lockedAttempt.sent[0].payload.embeds[0].data.fields[0].value, new RegExp(`Reach Tier ${unlockTier}`));
+        assert.equal(user.transformationForm, "normal");
     }
 });
 
@@ -708,7 +817,7 @@ test("Kaioken x10 drains 25 stamina per eligible message and drops to x4 when ex
 
 test("Kaioken stacks with SSGSS and Potential Unleashed and multiplies stamina costs", async () => {
     const human = createDefaultUser("user", "guild", 0);
-    human.level = 16;
+    human.level = 21;
     client.points.set("guild-user", human);
 
     await handleMessage(createMessage("!kaioken x3").message);
@@ -823,7 +932,7 @@ test("server owner can set level, set power, and reset an existing profile", asy
     await handleMessage(setPower.message);
     assert.equal(client.points.get(targetKey).points, 10500);
     assert.equal(client.points.get(targetKey).level, 2);
-    assert.match(getResponseText(setPower.sent[0]), /base power is now 10,500/);
+    assert.match(getResponseText(setPower.sent[0]), /base power is now 10\.5K/);
 
     const reset = createMessage("!reset @target", "owner", targetUser);
     await handleMessage(reset.message);
@@ -852,7 +961,8 @@ test("server owner can award additive power with an optional reason", async () =
     assert.equal(targetRecord.points, 12500);
     assert.equal(targetRecord.level, 2);
     const confirmation = getResponseText(award.sent.find((response) => getResponseText(response)));
-    assert.match(confirmation, /10,000 base power awarded/);
+    assert.match(confirmation, /10K base power awarded/);
+    assert.match(confirmation, /base power is now 10K/);
     assert.match(confirmation, /Reason: tournament win/);
 });
 

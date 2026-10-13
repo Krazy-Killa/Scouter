@@ -36,6 +36,7 @@ const { migrateLegacyEnmapData } = require("./enmap-migration");
 const { handleAdminCommand } = require("./commands/admin");
 const { createSlashCommands, handleSlashCommand } = require("./commands/slash-commands");
 const { ERROR_RESPONSE_COLOR, toEmbedPayload } = require("./commands/response-embeds");
+const { formatPowerAmount } = require("./commands/power-format");
 
 // Local config.json is optional; environment variables take precedence.
 let fileConfig = {};
@@ -89,9 +90,9 @@ const TRANSFORM_RULES = {
     ssj3: { minLevel: 33, trainingMultiplier: 400, trainingPenalty: 0.06, trainingCost: 4000, messageDrain: 15 },
     ssg: { minLevel: 50, setGodKi: true, trainingMultiplier: 450, trainingPenalty: 0.1, trainingCost: 4500, messageDrain: 5 },
     ssgss: { minGodTier: 15, trainingMultiplier: 500, trainingPenalty: 0.15, trainingCost: 5000, messageDrain: 10 },
-    potential: { minLevelByRace: { human: 16, namekian: 25 }, trainingMultiplier: 250, trainingPenalty: 0.08, trainingCost: 2500, messageDrain: 6 },
-    giant: { minLevel: 8, trainingMultiplier: 120, trainingPenalty: 0.05, trainingCost: 1200, messageDrain: 4 },
-    final: { minLevel: 8, trainingMultiplier: 120, trainingPenalty: 0.05, trainingCost: 1200, messageDrain: 4 },
+    potential: { minLevelByRace: { human: 21, namekian: 25 }, trainingMultiplier: 250, trainingPenalty: 0.08, trainingCost: 2500, messageDrain: 6 },
+    giant: { minLevel: 21, trainingMultiplier: 120, trainingPenalty: 0.05, trainingCost: 1200, messageDrain: 4 },
+    final: { minLevel: 21, trainingMultiplier: 120, trainingPenalty: 0.05, trainingCost: 1200, messageDrain: 4 },
     golden: { minLevel: 25, trainingMultiplier: 600, trainingPenalty: 0.1, trainingCost: 6000, messageDrain: 10 }
 };
 
@@ -134,9 +135,7 @@ const transformLabel = (form, godki = 0, race = "saiyan") => form === "normal"
     : `${transformationName(form, godki, race)} `;
 
 function formatPowerLevel(power) {
-    return power < 100000
-        ? numeral(power).format("0,0")
-        : numeral(power).format("0.0a");
+    return formatPowerAmount(power);
 }
 
 function waitAndDelete(message, ms) {
@@ -224,9 +223,9 @@ function getTierProgressDisplay(user) {
 
     return [
         getProgressBar(tierXpEarned, tierXpRequired),
-        `${numeral(tierXpEarned).format("0,0")} / ${numeral(tierXpRequired).format("0,0")} (${percentage}%)`,
+        `${formatPowerAmount(tierXpEarned)} / ${formatPowerAmount(tierXpRequired)} (${percentage}%)`,
         difference > 0
-            ? `${numeral(difference).format("0,0")} power needed`
+            ? `${formatPowerAmount(difference)} power needed`
             : "Ready to advance"
     ].join("\n");
 }
@@ -311,7 +310,7 @@ function getComparisonProfileDetails(user) {
         getCurrentFormName(user),
         "",
         "**⚡ Power · Base → Form**",
-        `${numeral(user.points - 2500).format("0,0")} → ${formatPowerLevel(user.points * user.transformation)}`,
+        `${formatPowerAmount(user.points - 2500)} → ${formatPowerLevel(user.points * user.transformation)}`,
         "",
         "**💪 Stamina**",
         getProgressBar(stamina, MAX_STAMINA),
@@ -549,7 +548,7 @@ async function handleMessage(message) {
                         {
                             name: "Next tier",
                             value: levelProgress.difference > 0
-                                ? `${numeral(levelProgress.difference).format("0,0")} more power needed`
+                                ? `${formatPowerAmount(levelProgress.difference)} more power needed`
                                 : "Ready to advance",
                             inline: true
                         },
@@ -606,7 +605,7 @@ async function handleMessage(message) {
         if (!changeRace(user, raceName)) {
             return replyTemporary(
                 message,
-                `Your race is locked after reaching ${numeral(RACE_LOCK_BASE_POWER).format("0,0")} base power.`,
+                `Your race is locked after reaching ${formatPowerAmount(RACE_LOCK_BASE_POWER)} base power.`,
                 10000,
                 "race locked response"
             );
@@ -712,8 +711,8 @@ async function handleMessage(message) {
                 { name: "/leaderboard", value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
                 { name: "/achievements", value: "Shows your unlocked achievements and progress.", inline: true },
                 { name: "/privacy action", value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
-                { name: "/race race", value: `Choose Saiyan, Human, Namekian, or Frieza Race before reaching ${numeral(RACE_LOCK_BASE_POWER).format("0,0")} base power.` },
-                { name: "/transform form", value: "Change your form. Beyond God attempts to awaken God Ki at Tier 50. First-time Saiyan SSG awakening requires five other Saiyan helpers." },
+                { name: "/race race", value: `Choose Saiyan, Human, Namekian, or Frieza Race before reaching ${formatPowerAmount(RACE_LOCK_BASE_POWER)} base power.` },
+                { name: "/transform form", value: "Change your form. Beyond God attempts to awaken God Ki at Tier 50. First-time Saiyan SSG awakening requires five distinct other Saiyan helpers." },
                 { name: "/kaioken level", value: "Activate or disable the universal Kaioken ability. Stamina drain is amplified when stacked with another form." },
                 { name: "/revert", value: "Automatically reverts you to your normal form." },
                 { name: "/train", value: "Trade stamina for a large one-time power boost. Training is available once per day." },
@@ -804,7 +803,7 @@ async function handleMessage(message) {
                 .addFields(
                     {
                         name: "⚡ Power · Base → Form",
-                        value: `${numeral(profile.points - 2500).format("0,0")} → ${formatPowerLevel(profile.points * profile.transformation)}`,
+                        value: `${formatPowerAmount(profile.points - 2500)} → ${formatPowerLevel(profile.points * profile.transformation)}`,
                         inline: true
                     },
                     {
@@ -1016,7 +1015,7 @@ async function handleMessage(message) {
                 : `Training in ${trainingFormName} converted stamina into power.`)
             .setColor("#08ff00")
             .addFields(
-                { name: "Power gained", value: numeral(powerGained).format("0,0"), inline: true },
+                { name: "Power gained", value: formatPowerAmount(powerGained), inline: true },
                 { name: "Stamina used", value: numeral(trainingCost).format("0,0"), inline: true },
                 { name: "Stamina remaining", value: `${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true },
                 { name: "Current power level", value: formatPowerLevel(user.points * user.transformation), inline: true }
@@ -1155,7 +1154,7 @@ async function handleMessage(message) {
                 if (uniqueHelperIds.length !== 5) {
                     return replyTemporary(
                         message,
-                        "Your first Super Saiyan God awakening requires exactly five other Saiyan helpers. Select five helpers in the helper options.",
+                        "Your first Super Saiyan God awakening requires exactly five distinct other Saiyan helpers. Select five different users in the helper options.",
                         10000,
                         "SSG awakening helper count response"
                     );
@@ -1208,7 +1207,7 @@ async function handleMessage(message) {
             .addFields(
                 { name: user.godki > 0 ? ":crossed_swords:God Tier" : ":crossed_swords:Tier", value: String(user.godki > 0 ? transformedProgress.godLevel : user.level), inline: true },
                 { name: "Powerlevel", value: formatPowerLevel(user.points * transformedLevel), inline: true },
-                { name: "Progress", value: `${numeral(transformedProgress.difference).format("0,0")} additional power till level up` },
+                { name: "Progress", value: `${formatPowerAmount(transformedProgress.difference)} additional power till level up` },
                 { name: "Stamina", value: `${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`, inline: true }
             );
 

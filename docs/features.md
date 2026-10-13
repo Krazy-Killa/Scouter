@@ -9,9 +9,11 @@ Commands use Discord's native `/` command picker. Scouter registers its global
 application commands at startup; initial registration can take some time to
 appear across Discord. See the [README command reference](../README.md#commands)
 for command options and setup. Most replies remain visible in the channel, while
-`/privacy` replies are private to the invoking member. Slash-command replies are
-not automatically deleted. Scouter formats its messages as embeds for a
-consistent presentation.
+`/privacy`, `/revert`, `/transform`, and `/kaioken` replies are private to the
+invoking member. Slash commands have a five-second per-user cooldown; attempts
+during the cooldown receive a private notice showing how long remains.
+Slash-command replies are not automatically deleted. Scouter formats its
+messages as embeds for a consistent presentation.
 
 ## Chat progression
 

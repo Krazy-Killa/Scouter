@@ -72,6 +72,16 @@ test("sets base power and recalculates the tier from total earned power", () => 
     assert.equal(user.level, 1);
 });
 
+test("a power gain advances the user when the displayed next-tier requirement is met", () => {
+    const user = createDefaultUser("user", "guild", 0);
+    const level5Threshold = getXpRequiredForLevel(5);
+    setBasePower(user, 2500 + level5Threshold - 1);
+    assert.equal(user.level, 5);
+
+    assert.equal(addExperience(user, 1), 1);
+    assert.equal(user.level, 6);
+});
+
 test("clears God Ki and reverts god forms when set power lowers the tier below 50", () => {
     const user = createDefaultUser("user", "guild", 0);
     user.race = "saiyan";
@@ -106,10 +116,7 @@ test("updates God Tier transformation scaling when set power raises an unlocked 
     user.race = "saiyan";
     user.godki = 50;
     setTransformation(user, "ssg");
-    const powerForGodTierTwo = 2500 + Array.from(
-        { length: 50 },
-        (_, index) => getXpRequiredForLevel(index + 1)
-    ).reduce((total, xp) => total + xp, 0);
+    const powerForGodTierTwo = 2500 + getXpRequiredForLevel(50);
 
     setBasePower(user, powerForGodTierTwo);
 

@@ -1,4 +1,4 @@
-const numeral = require("numeral");
+const { formatPowerAmount } = require("./power-format");
 const {
     createDefaultUser,
     getGodTierLevel,
@@ -99,7 +99,7 @@ async function handleAdminCommand({
         const reasonText = reason ? ` Reason: ${reason.replace(/@/g, "@\u200b")}` : "";
         await sendTemporary(
             message.channel,
-            `${numeral(amount).format("0,0")} base power awarded to ${targetUser.tag}; their base power is now ${numeral(user.points - 2500).format("0,0")} (${tierLabel}).${reasonText}`,
+            `${formatPowerAmount(amount)} base power awarded to ${targetUser.tag}; their base power is now ${formatPowerAmount(user.points - 2500)} (${tierLabel}).${reasonText}`,
             10000,
             "awardpower confirmation"
         );
@@ -121,7 +121,7 @@ async function handleAdminCommand({
         : `Tier ${user.level}`;
     await sendTemporary(
         message.channel,
-        `${targetUser.tag}'s base power is now ${numeral(power).format("0,0")} (${tierLabel}).`,
+        `${targetUser.tag}'s base power is now ${formatPowerAmount(power)} (${tierLabel}).`,
         10000,
         "setpower confirmation"
     );

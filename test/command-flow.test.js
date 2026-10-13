@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { client, handleMessage } = require("../xp");
+const { client, handleInteraction, handleMessage, SLASH_COMMANDS } = require("../xp");
 const { createDefaultUser } = require("../progression");
 
 class TestStore extends Map {
@@ -12,6 +12,9 @@ class TestStore extends Map {
 function createMessage(content, userId = "user", targetUser = null) {
     const sent = [];
     const replied = [];
+    const [commandName, ...commandArgs] = content.startsWith("!")
+        ? content.slice(1).trim().split(/\s+/g)
+        : [];
     const targetUsers = Array.isArray(targetUser) ? targetUser : targetUser ? [targetUser] : [];
     const targetMembers = targetUsers.map((user) => ({
         id: user.id,
@@ -34,6 +37,9 @@ function createMessage(content, userId = "user", targetUser = null) {
     };
     const message = {
         content,
+        isSlashCommand: content.startsWith("!"),
+        commandName: commandName?.toLowerCase() || null,
+        commandArgs,
         author,
         member: { displayName: userId },
         guild: {
@@ -61,10 +67,125 @@ function createMessage(content, userId = "user", targetUser = null) {
     return { message, sent, replied };
 }
 
+function createInteraction(commandName, optionValues = {}, userId = "user") {
+    const fixture = createMessage("", userId, optionValues.target || null);
+    const targetMember = fixture.message.mentions.members.first();
+    const interaction = {
+        commandName,
+        user: fixture.message.author,
+        member: fixture.message.member,
+        guild: fixture.message.guild,
+        options: {
+            getString: (name) => optionValues[name] ?? null,
+            getInteger: (name) => optionValues[name] ?? null,
+            getUser: (name) => optionValues[name] ?? null,
+            getMember: (name) => name === "target" ? targetMember : null
+        },
+        inGuild: () => true,
+        deferReply: async () => { interaction.deferred = true; },
+        editReply: async (payload) => {
+            const response = { payload, delete: async () => {} };
+            fixture.sent.push(response);
+            return response;
+        },
+        followUp: async (payload) => {
+            const response = { payload, delete: async () => {} };
+            fixture.sent.push(response);
+            return response;
+        },
+        reply: async (payload) => {
+            const response = { payload, delete: async () => {} };
+            fixture.replied.push(response);
+            return response;
+        }
+    };
+
+    return { interaction, ...fixture };
+}
+
 test.beforeEach(() => {
     client.points = new TestStore();
     client.privacy = new TestStore();
     client.user = { displayAvatarURL: () => "https://example.invalid/bot.png" };
+});
+
+test("registers the complete guild-only slash command set", () => {
+    const commands = SLASH_COMMANDS.map((command) => command.toJSON());
+    assert.deepEqual(commands.map((command) => command.name), [
+        "help", "scan", "profile", "compare", "leaderboard", "achievements",
+        "train", "transform", "kaioken", "revert", "race", "privacy",
+        "setlevel", "setpower", "awardpower", "reset"
+    ]);
+    const transform = commands.find((command) => command.name === "transform");
+    assert.deepEqual(transform.options.map((option) => option.name), [
+        "form", "helper1", "helper2", "helper3", "helper4", "helper5"
+    ]);
+    assert.equal(commands.every((command) => command.dm_permission === false), true);
+});
+
+test("slash interaction handles privacy opt-out and responds through the interaction", async () => {
+    const key = "guild-user";
+    client.points.set(key, createDefaultUser("user", "guild", 0));
+    const fixture = createInteraction("privacy", { action: "optout" });
+
+    await handleInteraction(fixture.interaction);
+
+    assert.equal(client.privacy.get(key), true);
+    assert.equal(client.points.has(key), false);
+    assert.equal(fixture.interaction.deferred, true);
+    assert.match(fixture.sent[0].payload, /saved progression record has been deleted/i);
+});
+
+test("slash transform passes five selected helpers to the first Saiyan SSG awakening", async () => {
+    const saiyan = createDefaultUser("user", "guild", 0);
+    saiyan.race = "saiyan";
+    saiyan.level = 50;
+    client.points.set("guild-user", saiyan);
+    const helpers = Array.from({ length: 5 }, (_, index) => ({
+        id: `helper-${index}`,
+        username: `helper-${index}`,
+        displayAvatarURL: () => "https://example.invalid/avatar.png"
+    }));
+    for (const helper of helpers) {
+        const profile = createDefaultUser(helper.id, "guild", 0);
+        profile.race = "saiyan";
+        client.points.set(`guild-${helper.id}`, profile);
+    }
+    const fixture = createInteraction("transform", {
+        form: "ssg",
+        ...Object.fromEntries(helpers.map((helper, index) => [`helper${index + 1}`, helper]))
+    });
+
+    await handleInteraction(fixture.interaction);
+
+    assert.equal(saiyan.godki, 50);
+    assert.equal(saiyan.transformationForm, "ssg");
+});
+
+test("slash owner control resolves its selected target and string power option", async () => {
+    const target = {
+        id: "target",
+        username: "target",
+        tag: "target#0001",
+        displayAvatarURL: () => "https://example.invalid/avatar.png"
+    };
+    const fixture = createInteraction("setpower", { target, power: "10000" }, "owner");
+
+    await handleInteraction(fixture.interaction);
+
+    assert.equal(client.points.get("guild-target").points, 10000);
+    assert.ok(fixture.sent.length >= 1);
+});
+
+test("legacy prefix text is not dispatched as a command", async () => {
+    const fixture = createMessage("!privacy optout");
+    fixture.message.isSlashCommand = false;
+
+    await handleMessage(fixture.message);
+
+    assert.equal(client.privacy.has("guild-user"), false);
+    assert.equal(client.points.has("guild-user"), false);
+    assert.equal(fixture.sent.length, 0);
 });
 
 test("privacy opt-out blocks progression and opt-in starts a fresh record", async () => {

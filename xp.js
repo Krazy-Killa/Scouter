@@ -1,6 +1,6 @@
 require("dotenv").config();
 
-const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder } = require("discord.js");
 const numeral = require("numeral");
 const Database = require("better-sqlite3");
 const { existsSync } = require("node:fs");
@@ -46,10 +46,10 @@ try {
 
 const packageVersion = require("./package.json").version;
 const COPYRIGHT_NOTICE = "© 2019-2026";
+const legacyMessagePrefix = process.env.DISCORD_PREFIX || fileConfig.prefix || "!";
 
 const config = {
     token: process.env.DISCORD_TOKEN || fileConfig.token,
-    prefix: process.env.DISCORD_PREFIX || fileConfig.prefix || "!",
     version: process.env.APP_VERSION || packageVersion,
     author: process.env.APP_AUTHOR || fileConfig.author || "Krazy-Killa",
     icon: process.env.APP_ICON || fileConfig.icon || "",
@@ -64,6 +64,84 @@ const client = new Client({
         GatewayIntentBits.MessageContent
     ]
 });
+
+const TRANSFORM_CHOICES = [
+    ["normal", "Normal"],
+    ["beyondgod", "Beyond God"],
+    ["ssj", "Super Saiyan"],
+    ["ssj2", "Super Saiyan 2"],
+    ["ssj3", "Super Saiyan 3"],
+    ["ssg", "Super Saiyan God"],
+    ["ssgss", "Super Saiyan God Super Saiyan"],
+    ["potential", "Potential Unleashed"],
+    ["giant", "Giant Namekian"],
+    ["final", "Final Form"],
+    ["golden", "Golden Form"]
+];
+
+function createSlashCommands() {
+    const commands = [
+        new SlashCommandBuilder().setName("help").setDescription("Show Scouter's commands."),
+        new SlashCommandBuilder().setName("scan").setDescription("Scan your power or another member.")
+            .addUserOption((option) => option.setName("target").setDescription("Member to scan")),
+        new SlashCommandBuilder().setName("profile").setDescription("View a progression profile.")
+            .addUserOption((option) => option.setName("target").setDescription("Member whose profile to view")),
+        new SlashCommandBuilder().setName("compare").setDescription("Compare progression with another member.")
+            .addUserOption((option) => option.setName("target").setDescription("Member to compare with").setRequired(true)),
+        new SlashCommandBuilder().setName("leaderboard").setDescription("Show this server's power rankings."),
+        new SlashCommandBuilder().setName("achievements").setDescription("View your progression achievements."),
+        new SlashCommandBuilder().setName("train").setDescription("Trade stamina for a training reward."),
+        new SlashCommandBuilder().setName("transform").setDescription("Change to an unlocked transformation.")
+            .addStringOption((option) => option.setName("form").setDescription("Transformation to use").setRequired(true)
+                .addChoices(...TRANSFORM_CHOICES.map(([value, name]) => ({ name, value }))))
+            .addUserOption((option) => option.setName("helper1").setDescription("Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper2").setDescription("Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper3").setDescription("Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper4").setDescription("Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper5").setDescription("Saiyan helper for your first SSG awakening")),
+        new SlashCommandBuilder().setName("kaioken").setDescription("Activate or disable Kaioken.")
+            .addStringOption((option) => option.setName("level").setDescription("Kaioken multiplier")
+                .setRequired(true)
+                .addChoices(
+                    { name: "x2", value: "x2" },
+                    { name: "x3", value: "x3" },
+                    { name: "x4", value: "x4" },
+                    { name: "x10", value: "x10" },
+                    { name: "Off", value: "off" }
+                )),
+        new SlashCommandBuilder().setName("revert").setDescription("Return to your base form."),
+        new SlashCommandBuilder().setName("race").setDescription("Choose your race before it locks.")
+            .addStringOption((option) => option.setName("race").setDescription("Race to become").setRequired(true)
+                .addChoices(
+                    { name: "Saiyan", value: "saiyan" },
+                    { name: "Human", value: "human" },
+                    { name: "Namekian", value: "namekian" },
+                    { name: "Frieza Race", value: "frieza" }
+                )),
+        new SlashCommandBuilder().setName("privacy").setDescription("Opt in or out of progression tracking.")
+            .addStringOption((option) => option.setName("action").setDescription("Privacy action").setRequired(true)
+                .addChoices(
+                    { name: "Opt out and delete my record", value: "optout" },
+                    { name: "Opt in again", value: "optin" }
+                )),
+        new SlashCommandBuilder().setName("setlevel").setDescription("Set a member's tier (server owner only).")
+            .addUserOption((option) => option.setName("target").setDescription("Member to update").setRequired(true))
+            .addIntegerOption((option) => option.setName("level").setDescription("New tier").setMinValue(1).setRequired(true)),
+        new SlashCommandBuilder().setName("setpower").setDescription("Set a member's base power (server owner only).")
+            .addUserOption((option) => option.setName("target").setDescription("Member to update").setRequired(true))
+            .addStringOption((option) => option.setName("power").setDescription("New base power (2,500 or higher)").setRequired(true)),
+        new SlashCommandBuilder().setName("awardpower").setDescription("Award base power to a member (server owner only).")
+            .addUserOption((option) => option.setName("target").setDescription("Member to reward").setRequired(true))
+            .addStringOption((option) => option.setName("amount").setDescription("Positive whole-number amount").setRequired(true))
+            .addStringOption((option) => option.setName("reason").setDescription("Optional reason").setMaxLength(200)),
+        new SlashCommandBuilder().setName("reset").setDescription("Reset a member's profile (server owner only).")
+            .addUserOption((option) => option.setName("target").setDescription("Member to reset").setRequired(true))
+    ];
+
+    return commands.map((command) => command.setDMPermission(false));
+}
+
+const SLASH_COMMANDS = createSlashCommands();
 
 // Progression and stamina balance values. Displayed power still uses lore multipliers.
 const STAMINA_REGEN_PER_DAY = 2000;
@@ -372,17 +450,89 @@ client.on("clientReady", () => {
     console.log(`[NOTICE] Bot has started, with ${client.users.cache.size} users, in ${client.channels.cache.size} channels of ${client.guilds.cache.size} guilds.`);
 });
 
+function createInteractionContext(interaction) {
+    const commandName = interaction.commandName;
+    const options = interaction.options;
+    const targetUser = options.getUser("target");
+    const helperUsers = commandName === "transform"
+        ? Array.from({ length: 5 }, (_, index) => options.getUser(`helper${index + 1}`)).filter(Boolean)
+        : [];
+    const mentionedUsers = helperUsers.length > 0 ? helperUsers : targetUser ? [targetUser] : [];
+    const targetMember = targetUser
+        ? options.getMember("target") || interaction.guild.members.cache.get(targetUser.id) || {
+            id: targetUser.id,
+            user: targetUser,
+            displayName: targetUser.globalName || targetUser.username
+        }
+        : null;
+    const commandArgs = [];
+
+    if (commandName === "privacy") commandArgs.push(options.getString("action"));
+    if (commandName === "race") commandArgs.push(options.getString("race"));
+    if (commandName === "kaioken") commandArgs.push(options.getString("level"));
+    if (commandName === "transform") commandArgs.push(options.getString("form"));
+    if (["setlevel", "setpower", "awardpower", "reset"].includes(commandName)) {
+        commandArgs.push(targetUser.id);
+        if (commandName === "setlevel") commandArgs.push(String(options.getInteger("level")));
+        if (commandName === "setpower") commandArgs.push(options.getString("power"));
+        if (commandName === "awardpower") {
+            commandArgs.push(options.getString("amount"));
+            const reason = options.getString("reason");
+            if (reason) commandArgs.push(reason);
+        }
+    }
+
+    let firstResponse = true;
+    const send = async (payload) => {
+        const response = firstResponse
+            ? await interaction.editReply(payload)
+            : await interaction.followUp(payload);
+        firstResponse = false;
+        return response;
+    };
+
+    return {
+        isSlashCommand: true,
+        commandName,
+        commandArgs,
+        content: "",
+        author: interaction.user,
+        member: interaction.member?.displayName
+            ? interaction.member
+            : { displayName: interaction.member?.nick || interaction.user.globalName || interaction.user.username },
+        guild: interaction.guild,
+        channel: { send },
+        mentions: {
+            members: { first: () => targetMember },
+            users: {
+                first: () => mentionedUsers[0] || null,
+                values: () => mentionedUsers.values()
+            }
+        },
+        delete: async () => {},
+        reply: send
+    };
+}
+
+async function handleInteraction(interaction) {
+    if (!interaction.inGuild()) {
+        await interaction.reply({ content: "Scouter commands are only available in a server.", ephemeral: true });
+        return;
+    }
+
+    await interaction.deferReply();
+    await handleMessage(createInteractionContext(interaction));
+}
+
 async function handleMessage(message) {
     if (!message.guild || message.author.bot) return;
 
     const rightNow = Date.now();
     const key = `${message.guild.id}-${message.author.id}`;
-    const isCommand = message.content.startsWith(config.prefix);
-    const args = isCommand ? message.content.slice(config.prefix.length).trim().split(/\s+/g) : [];
-    const command = args.length > 0 ? args.shift().toLowerCase() : null;
-    if (["help", "profile", "compare", "scan", "leaderboard", "achievements", "train", "transform", "kaioken", "revert", "race", "setlevel", "setpower", "awardpower", "reset", "privacy"].includes(command)) {
-        waitAndDelete(message, 1500);
-    }
+    const isSlashCommand = message.isSlashCommand === true;
+    if (!isSlashCommand && message.content.startsWith(legacyMessagePrefix)) return;
+    const args = isSlashCommand ? message.commandArgs || [] : [];
+    const command = isSlashCommand ? message.commandName : null;
 
     if (command === "privacy") {
         const privacyAction = args[0] ? args[0].toLowerCase() : null;
@@ -391,7 +541,7 @@ async function handleMessage(message) {
             cancelPendingNewUserNotice(message.guild.id, message.author.id);
             await sendTemporary(
                 message.channel,
-                `Progression tracking is off for you in this server. Your saved progression record has been deleted. Use \`${config.prefix}privacy optin\` to start fresh later.`,
+                "Progression tracking is off for you in this server. Your saved progression record has been deleted. Use `/privacy action:optin` to start fresh later.",
                 30000,
                 "privacy opt-out confirmation"
             );
@@ -406,7 +556,7 @@ async function handleMessage(message) {
         } else {
             await sendTemporary(
                 message.channel,
-                `Use \`${config.prefix}privacy optout\` to disable tracking and delete your saved record, or \`${config.prefix}privacy optin\` to start fresh later.`,
+                "Use `/privacy action:optout` to disable tracking and delete your saved record, or `/privacy action:optin` to start fresh later.",
                 30000,
                 "privacy command instructions"
             );
@@ -429,7 +579,7 @@ async function handleMessage(message) {
             }
         }
         if (args.length > 0 && !targetMember) {
-            await replyTemporary(message, `Mention a server member or provide their ID. Example: \`${config.prefix}scan @user\` or \`${config.prefix}scan user-id\`.`, 10000, "scan usage response");
+            await replyTemporary(message, "Choose a server member in the target option, or leave it empty to scan yourself.", 10000, "scan usage response");
             return;
         }
 
@@ -502,10 +652,10 @@ async function handleMessage(message) {
     }
 
     if (client.privacy.get(key)) {
-        if (isCommand) {
+        if (isSlashCommand) {
             await replyTemporary(
                 message,
-                `Progression tracking is off for you in this server. Use \`${config.prefix}privacy optin\` to start fresh.`,
+                "Progression tracking is off for you in this server. Use `/privacy action:optin` to start fresh.",
                 10000,
                 "opted-out command notice"
             );
@@ -572,7 +722,7 @@ async function handleMessage(message) {
         if (!rule) {
             return replyTemporary(
                 message,
-                `Choose a Kaioken level: \`${config.prefix}kaioken x2\`, \`x3\`, \`x4\`, \`x10\`, or \`off\`.`,
+                "Choose a Kaioken level: x2, x3, x4, x10, or off.",
                 10000,
                 "Kaioken usage response"
             );
@@ -606,7 +756,7 @@ async function handleMessage(message) {
         );
     }
 
-    if (!isCommand) {
+    if (!isSlashCommand) {
         if (message.content.length < config.minsize) return;
 
         const normalizedContent = normalizeMessage(message.content);
@@ -642,21 +792,21 @@ async function handleMessage(message) {
         const help = new EmbedBuilder()
             .setTitle("Command List")
             .addFields(
-                { name: `${config.prefix}scan [@user|user-id]`, value: "Run a power scan on yourself or another member; opted-out members cannot be scanned.", inline: true },
-                { name: `${config.prefix}profile [@user]`, value: "Displays your tier, power, form, stamina, progress, and achievements, or another member's profile.", inline: true },
-                { name: `${config.prefix}compare @user|user-id`, value: "Compares your progression with another server member by mention or ID.", inline: true },
-                { name: `${config.prefix}leaderboard`, value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
-                { name: `${config.prefix}achievements`, value: "Shows your unlocked achievements and progress.", inline: true },
-                { name: `${config.prefix}privacy`, value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
-                { name: `${config.prefix}race <race>`, value: `Choose Saiyan, Human, Namekian, or Frieza Race before reaching ${numeral(RACE_LOCK_BASE_POWER).format("0,0")} base power.` },
-                { name: `${config.prefix}transform <form>`, value: `Changes your form. Beyond God attempts to awaken God Ki at Tier 50 (5% chance, one try every 12 hours; pity chance rises after four failures). First-time Saiyan SSG awakening requires five other Saiyan helpers. Kaioken can stack with SSG, SSGSS, and Potential Unleashed, but not SSJ/SSJ2/SSJ3.` },
-                { name: `${config.prefix}kaioken <x2|x3|x4|x10|off>`, value: "Activates or disables the universal Kaioken ability. Stamina drain is amplified when stacked with another form." },
-                { name: `${config.prefix}revert`, value: "Automatically reverts you to your normal form." },
-                { name: `${config.prefix}train`, value: "Trade stamina for a large one-time power boost. Training is available once per day." },
-                { name: `${config.prefix}setlevel @user <level>`, value: "Set a member's tier (server owner only)." },
-                { name: `${config.prefix}setpower @user <power>`, value: "Set a member's base power and recalculate their tier (server owner only)." },
-                { name: `${config.prefix}awardpower @user <amount> [reason]`, value: "Add base power to a member and recalculate their tier (server owner only)." },
-                { name: `${config.prefix}reset @user`, value: "Reset a member's progression to a fresh profile (server owner only)." }
+                { name: "/scan [target]", value: "Run a power scan on yourself or another member; opted-out members cannot be scanned.", inline: true },
+                { name: "/profile [target]", value: "Displays your tier, power, form, stamina, progress, and achievements, or another member's profile.", inline: true },
+                { name: "/compare target", value: "Compare your progression with another server member.", inline: true },
+                { name: "/leaderboard", value: `Shows the all-time leaderboard for ${message.guild.name}; use reactions to change pages.`, inline: true },
+                { name: "/achievements", value: "Shows your unlocked achievements and progress.", inline: true },
+                { name: "/privacy action", value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
+                { name: "/race race", value: `Choose Saiyan, Human, Namekian, or Frieza Race before reaching ${numeral(RACE_LOCK_BASE_POWER).format("0,0")} base power.` },
+                { name: "/transform form", value: "Change your form. Beyond God attempts to awaken God Ki at Tier 50. First-time Saiyan SSG awakening requires five other Saiyan helpers." },
+                { name: "/kaioken level", value: "Activate or disable the universal Kaioken ability. Stamina drain is amplified when stacked with another form." },
+                { name: "/revert", value: "Automatically reverts you to your normal form." },
+                { name: "/train", value: "Trade stamina for a large one-time power boost. Training is available once per day." },
+                { name: "/setlevel target level", value: "Set a member's tier (server owner only)." },
+                { name: "/setpower target power", value: "Set a member's base power and recalculate their tier (server owner only)." },
+                { name: "/awardpower target amount [reason]", value: "Add base power to a member and recalculate their tier (server owner only)." },
+                { name: "/reset target", value: "Reset a member's progression to a fresh profile (server owner only)." }
             )
             .setColor("#008B8B")
             .setFooter({ text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`, iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 }) });
@@ -681,11 +831,11 @@ async function handleMessage(message) {
             }
         }
         if (command === "profile" && args.length > 0 && !targetMember) {
-            await replyTemporary(message, `Mention a server member or use \`${config.prefix}profile\` to view your own profile.`, 10000, "profile usage response");
+            await replyTemporary(message, "Choose a server member in the target option, or leave it empty to view your own profile.", 10000, "profile usage response");
             return;
         }
         if (command === "compare" && !targetMember) {
-            await replyTemporary(message, `Mention a server member or provide their ID. Example: \`${config.prefix}compare @user\` or \`${config.prefix}compare user-id\`.`, 10000, "compare usage response");
+            await replyTemporary(message, "Choose a server member in the target option to compare with.", 10000, "compare usage response");
             return;
         }
         if (command === "compare" && targetMember.id === message.author.id) {
@@ -1072,7 +1222,7 @@ async function handleMessage(message) {
                 if (uniqueHelperIds.length !== 5) {
                     return replyTemporary(
                         message,
-                        `Your first Super Saiyan God awakening requires exactly five other Saiyan helpers. Mention them: \`${config.prefix}transform ssg @one @two @three @four @five\`.`,
+                        "Your first Super Saiyan God awakening requires exactly five other Saiyan helpers. Select five helpers in the helper options.",
                         10000,
                         "SSG awakening helper count response"
                     );
@@ -1229,8 +1379,38 @@ async function handleMessage(message) {
 
 client.on("messageCreate", handleMessage);
 
+client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+    try {
+        await handleInteraction(interaction);
+    } catch (error) {
+        console.error(`Failed to handle /${interaction.commandName}:`, error);
+        try {
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply("Scouter could not complete that command. Please try again shortly.");
+            } else {
+                await interaction.reply({
+                    content: "Scouter could not complete that command. Please try again shortly.",
+                    ephemeral: true
+                });
+            }
+        } catch (responseError) {
+            console.error(`Failed to report /${interaction.commandName} error:`, responseError);
+        }
+    }
+});
+
 client.on("error", (error) => console.error(error));
 client.on("warn", (warning) => console.warn(warning));
+
+client.on("clientReady", async () => {
+    try {
+        await client.application.commands.set(SLASH_COMMANDS.map((command) => command.toJSON()));
+        console.log(`[NOTICE] Registered ${SLASH_COMMANDS.length} global slash commands.`);
+    } catch (error) {
+        console.error("Failed to register global slash commands:", error);
+    }
+});
 
 async function start() {
     try {
@@ -1262,4 +1442,4 @@ if (require.main === module) {
     start();
 }
 
-module.exports = { client, config, handleMessage };
+module.exports = { client, config, handleInteraction, handleMessage, SLASH_COMMANDS };

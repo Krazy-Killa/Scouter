@@ -1,6 +1,8 @@
 # Scouter
 An RPG-style Discord progression bot where members earn power through chat and training, unlock race-specific forms and universal God Ki, and compete on server leaderboards.
 
+See the [current feature guide](docs/features.md) for an overview of what the bot can do, and the [project roadmap](docs/roadmap.md) for possible next steps.
+
 ## Setup
 
 ### Install Node.js and npm
@@ -32,6 +34,8 @@ Do not commit your real token. Keep `.env` and any local `config.json` out of Gi
 
 ### Discord permissions and intent
 
+When inviting the bot, include the `bot` and `applications.commands` OAuth2 scopes so Discord can install its slash commands.
+
 Grant the bot these channel permissions:
 
 **Required for normal bot operation**
@@ -40,48 +44,46 @@ Grant the bot these channel permissions:
 - **Send Messages**
 - **Embed Links** — commands and progression notices use embeds.
 
-**Required for automatic cleanup**
-
-- **Manage Messages** — allows the bot to delete users' command messages. Without it, the bot can still run commands and delete its own messages, but command messages will remain. The bot logs deletion failures to its console.
-
 **Required for reaction-based leaderboard pagination**
 
 - **Add Reactions**
 - **Read Message History**
 - **Manage Messages** — used to remove the requesting user's reaction after a page change.
 
-The bot also needs the **Message Content Intent** enabled under **Developer Portal → Bot → Privileged Gateway Intents** so it can read command text and award progression for chat messages.
+The bot also needs the **Message Content Intent** enabled under **Developer Portal → Bot → Privileged Gateway Intents** to award progression for chat messages. Scouter registers its global application commands when it starts; after the first registration, Discord may take some time to show them everywhere.
 
 ## Commands
 
-Commands use the configured prefix, which defaults to `!`. Set another prefix with `DISCORD_PREFIX` in `.env` or `prefix` in a local `config.json`.
+Use Discord's `/` command picker. Scouter no longer handles prefix commands.
+Command responses remain visible in the channel; slash command invocations
+themselves do not create command messages that Scouter has to delete.
 
-| Command | Usage | Description |
+| Command | Options | Description |
 |---|---|---|
-| `help` | `!help` | Lists the bot's commands. |
-| `scan` | `!scan`, `!scan @user`, or `!scan <user-id>` | Displays a scouter-style power reading for you or another server member. Users who opted out of tracking cannot be scanned. |
-| `profile` | `!profile [@user]` | Shows base and displayed power, tier, form, stamina, progress to the next tier, achievements, and power earned per eligible message; can also show another member's profile. Profiles are unavailable for members who opted out. |
-| `compare` | `!compare @user` or `!compare <user-id>` | Compares base and displayed power, tier, form, stamina, progress, and achievements with another server member. |
-| `leaderboard` | `!leaderboard` | Shows the all-time rankings for the current server, 10 users per page, ordered by displayed power level. Use the left and right reactions to change pages. |
-| `achievements` | `!achievements` | Lists unlocked and locked achievements. |
-| `train` | `!train` | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
-| `transform` | `!transform <form>` | Changes to an unlocked racial or universal transformation; `!transform beyondgod` awakens God Ki at Tier 50. |
-| `kaioken` | `!kaioken <x2|x3|x4|x10|off>` | Activates or disables the universal Kaioken ability, which multiplies your active transformation. |
-| `revert` | `!revert` | Automatically returns you to your normal form (Beyond God if you have god ki). |
-| `race` | `!race <saiyan|human|namekian|frieza>` | Changes your race while your base power is below 1,000,000. Race changes permanently lock at that threshold. |
-| `privacy` | `!privacy optout` or `!privacy optin` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
-| `setlevel` | `!setlevel @user <level>` or `!setlevel <user-id> <level>` | Sets a user's tier without changing their accumulated power. Only the server owner can use this command. Setting the tier below 50 removes God Ki and reverts Super Saiyan God/Super Saiyan God Super Saiyan to normal. |
-| `setpower` | `!setpower @user <power>` or `!setpower <user-id> <power>` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500; only the server owner can use it. Setting power below Tier 50 removes God Ki and reverts Super Saiyan God/Super Saiyan God Super Saiyan to normal. |
-| `awardpower` | `!awardpower @user <amount> [reason]` | Adds a positive whole-number amount to a member's base power, recalculates their tier, and checks progression achievements. Only the server owner can use this command; opted-out members cannot receive awards. |
-| `reset` | `!reset @user` or `!reset <user-id>` | Resets an existing progression profile to its fresh starting state, including power, tier, form, stamina, training history, cooldowns, and achievements. Only the server owner can use this command. |
+| `/help` | — | Lists the bot's commands. |
+| `/scan` | Optional `target` | Displays a scouter-style power reading for you or another server member. Users who opted out of tracking cannot be scanned. |
+| `/profile` | Optional `target` | Shows base and displayed power, tier, form, stamina, progress to the next tier, achievements, and power earned per eligible message; can also show another member's profile. |
+| `/compare` | Required `target` | Compares base and displayed power, tier, form, stamina, progress, and achievements with another server member. |
+| `/leaderboard` | — | Shows all-time server rankings, 10 users per page, ordered by displayed power. Use the left and right reactions to change pages. |
+| `/achievements` | — | Lists unlocked and locked achievements. |
+| `/train` | — | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
+| `/transform` | Required `form`; optional `helper1`–`helper5` | Changes to an unlocked racial or universal transformation. Select five other Saiyan helpers for a first-time SSG awakening. |
+| `/kaioken` | Required `level` | Activates x2/x3/x4/x10 or disables the universal Kaioken ability. |
+| `/revert` | — | Automatically returns you to your normal form (Beyond God if you have God Ki). |
+| `/race` | Required `race` | Changes your race while your base power is below 1,000,000. Race changes permanently lock at that threshold. |
+| `/privacy` | Required `action` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
+| `/setlevel` | Required `target`, `level` | Sets a user's tier without changing accumulated power. Server owner only. |
+| `/setpower` | Required `target`, `power` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500. Server owner only. |
+| `/awardpower` | Required `target`, `amount`; optional `reason` | Adds a positive whole-number amount to a member's base power, recalculates their tier, and checks progression achievements. Server owner only. |
+| `/reset` | Required `target` | Resets an existing profile to its fresh starting state. Server owner only. |
 
-Replace `!` in these examples if you configured a different prefix. `setlevel` changes only the tier, `setpower` replaces base power and recalculates the tier, and `awardpower` adds to base power. Administrative commands cannot modify a member who opted out of progression tracking.
+`setlevel` changes only the tier, `setpower` replaces base power and recalculates the tier, and `awardpower` adds to base power. Administrative commands cannot modify a member who opted out of progression tracking. Command invocations are native Discord interactions; bot responses remain visible in the channel as before.
 
 For leaderboards with multiple pages, use the left and right reactions beneath the leaderboard to navigate. The controls are available to the person who ran the command for two minutes.
 
 ### Races and transformations
 
-New profiles start as Human. Existing profiles that predate race tracking and have no saved race remain Saiyan for compatibility. Use `!race <saiyan|human|namekian|frieza>` to change race before reaching 1,000,000 base power. At or above that amount, race locks permanently. Changing race resets the active race-specific form to Normal, but keeps power and universal God Ki.
+New profiles start as Human. Existing profiles that predate race tracking and have no saved race remain Saiyan for compatibility. Use `/race` to change race before reaching 1,000,000 base power. At or above that amount, race locks permanently. Changing race resets the active race-specific form to Normal, but keeps power and universal God Ki.
 
 Only one transformation can be active at a time. Base multipliers shown here apply before God Ki scaling.
 
@@ -101,7 +103,7 @@ Only one transformation can be active at a time. Base multipliers shown here app
 | Super Saiyan God | Tier 50 | 20,000×–30,000× |
 | Super Saiyan God Super Saiyan | God Tier 15 | 50× Super Saiyan God |
 
-To awaken God Ki through your first Super Saiyan God transformation, mention five other players with existing Saiyan profiles: `!transform ssg @one @two @three @four @five`.
+To awaken God Ki through your first Super Saiyan God transformation, choose five other players with existing Saiyan profiles in the `helper1` through `helper5` options of `/transform`.
 
 #### Namekian
 
@@ -126,12 +128,12 @@ Kaioken is a universal ability that multiplies your active transformation:
 | Kaioken x4 | Tier 16 | 4× |
 | Kaioken x10 | Tier 25 | 10× |
 
-Activate an unlocked level with `!kaioken x2`, `!kaioken x3`, `!kaioken x4`, or `!kaioken x10`; use `!kaioken off` to disable it. Kaioken stacks with Super Saiyan God, Super Saiyan God Super Saiyan, Potential Unleashed, and other compatible forms. It cannot be combined with Super Saiyan, Super Saiyan 2, or Super Saiyan 3 because their ki is unstable. If stamina runs out, you drop one Kaioken level at a time before dropping the active transformation.
+Activate an unlocked level with `/kaioken level:x2`, `x3`, `x4`, or `x10`; choose `off` to disable it. Kaioken stacks with Super Saiyan God, Super Saiyan God Super Saiyan, Potential Unleashed, and other compatible forms. It cannot be combined with Super Saiyan, Super Saiyan 2, or Super Saiyan 3 because their ki is unstable. If stamina runs out, you drop one Kaioken level at a time before dropping the active transformation.
 
 #### Universal God Ki
 
-- Any race can attempt to awaken God Ki at Tier 50 with `!transform beyondgod`. Awakening is not guaranteed: you get one attempt every 12 hours, with a 5% chance for each of your first four attempts. After four failures, the chance doubles each attempt: 10%, 20%, 40%, 80%, then 100%.
-- Saiyans can instead awaken God Ki by transforming into Super Saiyan God for the first time. This requires five other players with existing Saiyan progression profiles; mention them with the command: `!transform ssg @one @two @three @four @five`. Later SSG transformations do not require helpers.
+- Any race can attempt to awaken God Ki at Tier 50 with `/transform form:beyondgod`. Awakening is not guaranteed: you get one attempt every 12 hours, with a 5% chance for each of your first four attempts. After four failures, the chance doubles each attempt: 10%, 20%, 40%, 80%, then 100%.
+- Saiyans can instead awaken God Ki by transforming into Super Saiyan God for the first time. This requires five other players with existing Saiyan progression profiles; select them in the helper options of `/transform form:ssg`. Later SSG transformations do not require helpers.
 - Awakening sets the current overall level as God Tier 1. God Tier continues to increase with levels, while God Ki multipliers stop scaling after God Tier 15.
 - Beyond God is the shared base form for all races after awakening. God Tier scales Beyond God from 1× to 400×.
 - God Tier also scales Kaioken and each race's forms by the Beyond God multiplier. Saiyan Super Saiyan forms retain their existing caps below Super Saiyan God; Super Saiyan God and Super Saiyan God Super Saiyan remain Saiyan-only.
@@ -175,7 +177,7 @@ $backup = Join-Path $env:USERPROFILE ("Scouter-data-" + (Get-Date -Format "yyyyM
 Compress-Archive -Path .\data -DestinationPath $backup
 ```
 
-To restore, stop the bot, preserve or rename the existing `data` folder, then extract the chosen backup into the project folder. Restoring an older backup can restore progression records that were later deleted and can also roll privacy preferences back to the time of that backup. After startup, reapply any opt-out requests received since the backup was made with `!privacy optout` before allowing members to use progression features; this removes the restored progression record and saves the opt-out marker. For example:
+To restore, stop the bot, preserve or rename the existing `data` folder, then extract the chosen backup into the project folder. Restoring an older backup can restore progression records that were later deleted and can also roll privacy preferences back to the time of that backup. After startup, reapply any opt-out requests received since the backup was made with `/privacy action:optout` before allowing members to use progression features; this removes the restored progression record and saves the opt-out marker. For example:
 
 ```powershell
 Rename-Item .\data .\data-before-restore
@@ -194,7 +196,7 @@ npm test
 
 ## User privacy
 
-Use `!privacy optout` to stop progression tracking in the current server and delete that server's active progression record, including power, training state, and achievements. Opt-out is per server; it does not affect data the member may have in another server. While opted out, ordinary chat does not create or update the member's record, and scans, profiles, and comparisons cannot read it. The `!privacy` command remains available to opt back in; a fresh record is created on the member's next chat message.
+Use `/privacy action:optout` to stop progression tracking in the current server and delete that server's active progression record, including power, training state, and achievements. Opt-out is per server; it does not affect data the member may have in another server. While opted out, ordinary chat does not create or update the member's record, and scans, profiles, and comparisons cannot read it. The `/privacy` command remains available to opt back in; a fresh record is created on the member's next chat message.
 
 Progression commands may post profile or scan details in the channel where they are used, so choose an appropriately private channel if those details should not be visible to everyone who can read it. Opting out deletes the active record but cannot erase copies in backups already made. If a member requests deletion of historical copies too, remove the relevant backup files; account for that request when restoring any older backup.
 
@@ -203,9 +205,9 @@ Progression commands may post profile or scan details in the channel where they 
 - Eligible messages grant 400–660 progression power, independent of transformation. The base random award is 400–600; messages earn up to 10% extra based on non-whitespace length, capped at 200 characters. Transformation multipliers remain in effect for displayed power level.
 - To reduce chat spam, only one message per user can earn power every 60 seconds. Repeating the same normalized message within 10 minutes of its last power award does not earn power.
 - The XP required to advance from level `L` is cumulative: `5,000 × L + 3,000 × (L × (L + 1) × (2L + 1) / 6)`. Super Saiyan God Super Saiyan requires God Tier 15; the overall level where it unlocks depends on when God Ki was awakened.
-- Messages shorter than the configured minimum size and messages beginning with the command prefix do not grant progression power.
+- Messages shorter than the configured minimum size and messages beginning with the legacy message prefix do not grant progression power. Commands are invoked with Discord's `/` command picker.
 - Training rewards use form-specific multipliers and penalties, separate from the lore-based displayed power multipliers. Base-form training is the most stamina-efficient option.
 - A user's progression record is created the first time they chat in a server. New-user notices are batched per server and sent no more than once per minute, showing both the number added in that update and the total users tracked.
-- Achievements are announced when earned and can be reviewed with `!achievements`. They include tier and power milestones, first-time transformations, a first training session, and training on seven consecutive UTC calendar days.
+- Achievements are announced when earned and can be reviewed with `/achievements`. They include tier and power milestones, first-time transformations, a first training session, and training on seven consecutive UTC calendar days.
 
 At 100 eligible messages per day, the current numbers estimate roughly nine months to reach overall level 64 for an active user who starts at level 1, trains regularly, and uses higher forms before returning to base to recover stamina. Super Saiyan God Super Saiyan unlock timing depends on when the user awakens God Ki. Actual timing varies with message eligibility, training use, and stamina management.

@@ -55,8 +55,9 @@ The bot also needs the **Message Content Intent** enabled under **Developer Port
 ## Commands
 
 Use Discord's `/` command picker. Scouter no longer handles prefix commands.
-Command responses remain visible in the channel; slash command invocations
-themselves do not create command messages that Scouter has to delete.
+Most command responses remain visible in the channel; `/privacy` replies are
+private to the invoking member. Slash-command invocations themselves do not
+create command messages, and bot responses are not automatically deleted.
 
 | Command | Options | Description |
 |---|---|---|

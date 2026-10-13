@@ -1,6 +1,6 @@
 require("dotenv").config();
 
-const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, MessageFlags } = require("discord.js");
 const numeral = require("numeral");
 const Database = require("better-sqlite3");
 const { existsSync } = require("node:fs");
@@ -29,12 +29,12 @@ const {
     optOutUser,
     recordMessageXp,
     recordTrainingDay,
-    setBasePower,
     setKaiokenLevel,
-    setUserLevel,
     setTransformation
 } = require("./progression");
 const { migrateLegacyEnmapData } = require("./enmap-migration");
+const { handleAdminCommand } = require("./commands/admin");
+const { createSlashCommands, handleSlashCommand } = require("./commands/slash-commands");
 
 // Local config.json is optional; environment variables take precedence.
 let fileConfig = {};
@@ -64,82 +64,6 @@ const client = new Client({
         GatewayIntentBits.MessageContent
     ]
 });
-
-const TRANSFORM_CHOICES = [
-    ["normal", "Normal"],
-    ["beyondgod", "Beyond God"],
-    ["ssj", "Super Saiyan"],
-    ["ssj2", "Super Saiyan 2"],
-    ["ssj3", "Super Saiyan 3"],
-    ["ssg", "Super Saiyan God"],
-    ["ssgss", "Super Saiyan God Super Saiyan"],
-    ["potential", "Potential Unleashed"],
-    ["giant", "Giant Namekian"],
-    ["final", "Final Form"],
-    ["golden", "Golden Form"]
-];
-
-function createSlashCommands() {
-    const commands = [
-        new SlashCommandBuilder().setName("help").setDescription("Show Scouter's commands."),
-        new SlashCommandBuilder().setName("scan").setDescription("Scan your power or another member.")
-            .addUserOption((option) => option.setName("target").setDescription("Member to scan")),
-        new SlashCommandBuilder().setName("profile").setDescription("View a progression profile.")
-            .addUserOption((option) => option.setName("target").setDescription("Member whose profile to view")),
-        new SlashCommandBuilder().setName("compare").setDescription("Compare progression with another member.")
-            .addUserOption((option) => option.setName("target").setDescription("Member to compare with").setRequired(true)),
-        new SlashCommandBuilder().setName("leaderboard").setDescription("Show this server's power rankings."),
-        new SlashCommandBuilder().setName("achievements").setDescription("View your progression achievements."),
-        new SlashCommandBuilder().setName("train").setDescription("Trade stamina for a training reward."),
-        new SlashCommandBuilder().setName("transform").setDescription("Change to an unlocked transformation.")
-            .addStringOption((option) => option.setName("form").setDescription("Transformation to use").setRequired(true)
-                .addChoices(...TRANSFORM_CHOICES.map(([value, name]) => ({ name, value }))))
-            .addUserOption((option) => option.setName("helper1").setDescription("Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper2").setDescription("Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper3").setDescription("Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper4").setDescription("Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper5").setDescription("Saiyan helper for your first SSG awakening")),
-        new SlashCommandBuilder().setName("kaioken").setDescription("Activate or disable Kaioken.")
-            .addStringOption((option) => option.setName("level").setDescription("Kaioken multiplier")
-                .setRequired(true)
-                .addChoices(
-                    { name: "x2", value: "x2" },
-                    { name: "x3", value: "x3" },
-                    { name: "x4", value: "x4" },
-                    { name: "x10", value: "x10" },
-                    { name: "Off", value: "off" }
-                )),
-        new SlashCommandBuilder().setName("revert").setDescription("Return to your base form."),
-        new SlashCommandBuilder().setName("race").setDescription("Choose your race before it locks.")
-            .addStringOption((option) => option.setName("race").setDescription("Race to become").setRequired(true)
-                .addChoices(
-                    { name: "Saiyan", value: "saiyan" },
-                    { name: "Human", value: "human" },
-                    { name: "Namekian", value: "namekian" },
-                    { name: "Frieza Race", value: "frieza" }
-                )),
-        new SlashCommandBuilder().setName("privacy").setDescription("Opt in or out of progression tracking.")
-            .addStringOption((option) => option.setName("action").setDescription("Privacy action").setRequired(true)
-                .addChoices(
-                    { name: "Opt out and delete my record", value: "optout" },
-                    { name: "Opt in again", value: "optin" }
-                )),
-        new SlashCommandBuilder().setName("setlevel").setDescription("Set a member's tier (server owner only).")
-            .addUserOption((option) => option.setName("target").setDescription("Member to update").setRequired(true))
-            .addIntegerOption((option) => option.setName("level").setDescription("New tier").setMinValue(1).setRequired(true)),
-        new SlashCommandBuilder().setName("setpower").setDescription("Set a member's base power (server owner only).")
-            .addUserOption((option) => option.setName("target").setDescription("Member to update").setRequired(true))
-            .addStringOption((option) => option.setName("power").setDescription("New base power (2,500 or higher)").setRequired(true)),
-        new SlashCommandBuilder().setName("awardpower").setDescription("Award base power to a member (server owner only).")
-            .addUserOption((option) => option.setName("target").setDescription("Member to reward").setRequired(true))
-            .addStringOption((option) => option.setName("amount").setDescription("Positive whole-number amount").setRequired(true))
-            .addStringOption((option) => option.setName("reason").setDescription("Optional reason").setMaxLength(200)),
-        new SlashCommandBuilder().setName("reset").setDescription("Reset a member's profile (server owner only).")
-            .addUserOption((option) => option.setName("target").setDescription("Member to reset").setRequired(true))
-    ];
-
-    return commands.map((command) => command.setDMPermission(false));
-}
 
 const SLASH_COMMANDS = createSlashCommands();
 
@@ -231,10 +155,15 @@ function waitAndDelete(message, ms) {
 async function sendTemporary(channel, content, deleteAfterMs, context) {
     try {
         const sentMessage = await channel.send(content);
-        waitAndDelete(sentMessage, deleteAfterMs);
+        if (!channel.isSlashCommandResponse) {
+            waitAndDelete(sentMessage, deleteAfterMs);
+        }
         return sentMessage;
     } catch (error) {
         console.error(`Failed to send ${context}:`, error);
+        if (channel.isSlashCommandResponse) {
+            return channel.reportFailure(error, context);
+        }
         return null;
     }
 }
@@ -242,10 +171,15 @@ async function sendTemporary(channel, content, deleteAfterMs, context) {
 async function replyTemporary(message, content, deleteAfterMs, context) {
     try {
         const reply = await message.reply(content);
-        waitAndDelete(reply, deleteAfterMs);
+        if (!message.isSlashCommand) {
+            waitAndDelete(reply, deleteAfterMs);
+        }
         return reply;
     } catch (error) {
         console.error(`Failed to send ${context}:`, error);
+        if (message.isSlashCommand) {
+            return message.channel.reportFailure(error, context);
+        }
         return null;
     }
 }
@@ -261,6 +195,30 @@ function getCurrentFormName(user) {
     const formName = transformationName(getCurrentForm(user), user.godki, user.race);
     if (user.kaiokenLevel > 0) return `${formName} + Kaioken x${user.kaiokenLevel}`;
     return formName;
+}
+
+function getProgressBar(value, maximum, length = 10) {
+    const progress = maximum > 0 ? Math.max(0, Math.min(1, value / maximum)) : 0;
+    const status = progress >= 2 / 3 ? "🟢" : progress >= 1 / 3 ? "🟡" : "🔴";
+    const filledBars = Math.round(progress * length);
+    return `${status} ${"▰".repeat(filledBars)}${"▱".repeat(length - filledBars)}`;
+}
+
+function getTierProgressDisplay(user) {
+    const { currentXp, nextLevelXp, difference } = getLevelProgress(user);
+    const previousLevelXp = user.level > 1 ? getXpRequiredForLevel(user.level - 1) : 0;
+    const tierXpRequired = nextLevelXp - previousLevelXp;
+    const tierXpEarned = Math.max(0, Math.min(tierXpRequired, currentXp - previousLevelXp));
+    const progress = tierXpRequired > 0 ? tierXpEarned / tierXpRequired : 1;
+    const percentage = Math.round(progress * 100);
+
+    return [
+        getProgressBar(tierXpEarned, tierXpRequired),
+        `${numeral(tierXpEarned).format("0,0")} / ${numeral(tierXpRequired).format("0,0")} (${percentage}%)`,
+        difference > 0
+            ? `${numeral(difference).format("0,0")} power needed`
+            : "Ready to advance"
+    ].join("\n");
 }
 
 function getStaminaCosts(user, rule) {
@@ -332,29 +290,27 @@ function createProfileSnapshot(user, now) {
     return snapshot;
 }
 
-function getProfileDetails(user) {
+function getComparisonProfileDetails(user) {
     const levelProgress = getLevelProgress(user);
     const tier = user.godki > 0
         ? `God Tier ${levelProgress.godLevel}`
         : `Tier ${user.level}`;
+    const stamina = Math.floor(user.stamina);
     return [
-        `**Tier:** ${tier}`,
-        `**Race:** ${RACES[user.race]?.name || RACES.saiyan.name}`,
-        `**Base power:** ${numeral(user.points - 2500).format("0,0")}`,
-        `**Displayed power:** ${formatPowerLevel(user.points * user.transformation)}`,
-        `**Current form:** ${getCurrentFormName(user)}`,
-        `**Stamina:** ${numeral(Math.floor(user.stamina)).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`,
-        `**Next tier:** ${levelProgress.difference > 0
-            ? `${numeral(levelProgress.difference).format("0,0")} more power needed`
-            : "Ready to advance"}`,
-        `**Achievements:** ${user.achievements.length} / ${Object.keys(ACHIEVEMENTS).length}`
+        `**${tier} · ${RACES[user.race]?.name || RACES.saiyan.name}**`,
+        getCurrentFormName(user),
+        "",
+        "**⚡ Power · Base → Form**",
+        `${numeral(user.points - 2500).format("0,0")} → ${formatPowerLevel(user.points * user.transformation)}`,
+        "",
+        "**💪 Stamina**",
+        getProgressBar(stamina, MAX_STAMINA),
+        `${numeral(stamina).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`,
+        "",
+        "**📈 Progress**",
+        getTierProgressDisplay(user),
+        `Achievements · ${user.achievements.length} / ${Object.keys(ACHIEVEMENTS).length}`
     ].join("\n");
-}
-
-function getMessagePowerRange() {
-    const minimum = BASE_MESSAGE_XP;
-    const maximum = Math.floor((BASE_MESSAGE_XP + MESSAGE_XP_VARIANCE) * (1 + MESSAGE_LENGTH_BONUS));
-    return `${numeral(minimum).format("0,0")}–${numeral(maximum).format("0,0")} power per eligible message, depending on message length.`;
 }
 
 // Send one summary even if a large reward crosses several levels.
@@ -450,78 +406,8 @@ client.on("clientReady", () => {
     console.log(`[NOTICE] Bot has started, with ${client.users.cache.size} users, in ${client.channels.cache.size} channels of ${client.guilds.cache.size} guilds.`);
 });
 
-function createInteractionContext(interaction) {
-    const commandName = interaction.commandName;
-    const options = interaction.options;
-    const targetUser = options.getUser("target");
-    const helperUsers = commandName === "transform"
-        ? Array.from({ length: 5 }, (_, index) => options.getUser(`helper${index + 1}`)).filter(Boolean)
-        : [];
-    const mentionedUsers = helperUsers.length > 0 ? helperUsers : targetUser ? [targetUser] : [];
-    const targetMember = targetUser
-        ? options.getMember("target") || interaction.guild.members.cache.get(targetUser.id) || {
-            id: targetUser.id,
-            user: targetUser,
-            displayName: targetUser.globalName || targetUser.username
-        }
-        : null;
-    const commandArgs = [];
-
-    if (commandName === "privacy") commandArgs.push(options.getString("action"));
-    if (commandName === "race") commandArgs.push(options.getString("race"));
-    if (commandName === "kaioken") commandArgs.push(options.getString("level"));
-    if (commandName === "transform") commandArgs.push(options.getString("form"));
-    if (["setlevel", "setpower", "awardpower", "reset"].includes(commandName)) {
-        commandArgs.push(targetUser.id);
-        if (commandName === "setlevel") commandArgs.push(String(options.getInteger("level")));
-        if (commandName === "setpower") commandArgs.push(options.getString("power"));
-        if (commandName === "awardpower") {
-            commandArgs.push(options.getString("amount"));
-            const reason = options.getString("reason");
-            if (reason) commandArgs.push(reason);
-        }
-    }
-
-    let firstResponse = true;
-    const send = async (payload) => {
-        const response = firstResponse
-            ? await interaction.editReply(payload)
-            : await interaction.followUp(payload);
-        firstResponse = false;
-        return response;
-    };
-
-    return {
-        isSlashCommand: true,
-        commandName,
-        commandArgs,
-        content: "",
-        author: interaction.user,
-        member: interaction.member?.displayName
-            ? interaction.member
-            : { displayName: interaction.member?.nick || interaction.user.globalName || interaction.user.username },
-        guild: interaction.guild,
-        channel: { send },
-        mentions: {
-            members: { first: () => targetMember },
-            users: {
-                first: () => mentionedUsers[0] || null,
-                values: () => mentionedUsers.values()
-            }
-        },
-        delete: async () => {},
-        reply: send
-    };
-}
-
 async function handleInteraction(interaction) {
-    if (!interaction.inGuild()) {
-        await interaction.reply({ content: "Scouter commands are only available in a server.", ephemeral: true });
-        return;
-    }
-
-    await interaction.deferReply();
-    await handleMessage(createInteractionContext(interaction));
+    await handleSlashCommand(interaction, handleMessage);
 }
 
 async function handleMessage(message) {
@@ -596,6 +482,25 @@ async function handleMessage(message) {
             })
             .setThumbnail(targetUser.displayAvatarURL({ dynamic: true, size: 256 }))
             .setColor("#E34B4B");
+
+        if (targetUser.id === client.user.id) {
+            scanEmbed
+                .setTitle("SCOUTER // SELF-SCAN")
+                .setDescription("**RECURSIVE SCAN DETECTED**")
+                .setColor("#08ff00")
+                .addFields(
+                    { name: "Power reading", value: "OVER 9,000!", inline: true },
+                    { name: "Signal profile", value: "Autonomous Scouter Unit", inline: true },
+                    { name: "Scan status", value: "Unreadable • Scanner cannot measure itself", inline: true },
+                    { name: "Result", value: "Nice try. I do the scanning around here." }
+                )
+                .setFooter({
+                    text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`,
+                    iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 })
+                });
+            await sendTemporary(message.channel, { embeds: [scanEmbed] }, 15000, "self-scan response");
+            return;
+        }
 
         if (client.privacy.get(targetKey)) {
             scanEmbed
@@ -873,6 +778,11 @@ async function handleMessage(message) {
             || (targetUser.id === message.author.id ? message.member?.displayName : null)
             || targetUser.username;
         if (command === "profile") {
+            const levelProgress = getLevelProgress(profile);
+            const tier = profile.godki > 0
+                ? `God Tier ${levelProgress.godLevel}`
+                : `Tier ${profile.level}`;
+            const stamina = Math.floor(profile.stamina);
             const profileEmbed = new EmbedBuilder()
                 .setAuthor({
                     name: `${transformLabel(getCurrentForm(profile), profile.godki, profile.race)}${displayName}`,
@@ -880,9 +790,25 @@ async function handleMessage(message) {
                 })
                 .setThumbnail(targetUser.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setTitle("Progression Profile")
-                .setDescription(getProfileDetails(profile))
+                .setDescription(`**${tier}** · ${RACES[profile.race]?.name || RACES.saiyan.name}\n${getCurrentFormName(profile)}`)
                 .setColor(borderColor(getCurrentForm(profile)))
-                .addFields({ name: "Power per message", value: getMessagePowerRange() })
+                .addFields(
+                    {
+                        name: "⚡ Power · Base → Form",
+                        value: `${numeral(profile.points - 2500).format("0,0")} → ${formatPowerLevel(profile.points * profile.transformation)}`,
+                        inline: true
+                    },
+                    {
+                        name: "💪 Stamina",
+                        value: `${getProgressBar(stamina, MAX_STAMINA)}\n${numeral(stamina).format("0,0")} / ${numeral(MAX_STAMINA).format("0,0")}`,
+                        inline: true
+                    },
+                    {
+                        name: "📈 Progress",
+                        value: `**Next tier:**\n${getTierProgressDisplay(profile)}\n**Achievements:** ${profile.achievements.length} / ${Object.keys(ACHIEVEMENTS).length}`,
+                        inline: false
+                    }
+                )
                 .setFooter({
                     text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`,
                     iconURL: client.user.displayAvatarURL({ extension: "png", size: 64 })
@@ -895,11 +821,11 @@ async function handleMessage(message) {
         const viewerName = message.member?.displayName || message.author.username;
         const comparisonEmbed = new EmbedBuilder()
             .setTitle("Progression Comparison")
+            .setDescription("Server progression at a glance")
             .setColor("#008B8B")
             .addFields(
-                { name: viewerName, value: getProfileDetails(viewerProfile), inline: true },
-                { name: displayName, value: getProfileDetails(profile), inline: true },
-                { name: "Power per message", value: getMessagePowerRange() }
+                { name: viewerName, value: getComparisonProfileDetails(viewerProfile), inline: true },
+                { name: displayName, value: getComparisonProfileDetails(profile), inline: true }
             )
             .setFooter({
                 text: `Scouter Bot ${config.version} | ${COPYRIGHT_NOTICE} ${config.author}`,
@@ -1283,98 +1209,16 @@ async function handleMessage(message) {
         return;
     }
 
-    // Guild-owner-only utilities for administrative progression adjustments.
-    if (["setlevel", "setpower", "awardpower", "reset"].includes(command)) {
-        const guildOwner = message.guild.ownerId ?? null;
-        if (message.author.id !== guildOwner) {
-            return replyTemporary(message, "Only the server owner can use this progression command.", 10000, `${command} permission response`);
-        }
-
-        const userMention = message.mentions.users.first() || client.users.cache.get(args[0]);
-        if (!userMention) {
-            return replyTemporary(message, "Mention a server member or provide their user ID.", 10000, `${command} user response`);
-        }
-
-        const targetKey = `${message.guild.id}-${userMention.id}`;
-        if (client.privacy.get(targetKey)) {
-            return replyTemporary(message, "That user has opted out of progression tracking.", 10000, `${command} privacy response`);
-        }
-
-        if (command === "reset") {
-            if (!client.points.has(targetKey)) {
-                return replyTemporary(message, "That user does not have a progression profile to reset.", 10000, "reset missing-profile response");
-            }
-            client.points.set(targetKey, createDefaultUser(userMention.id, message.guild.id, rightNow));
-            return sendTemporary(message.channel, `${userMention.tag}'s progression has been reset to a fresh profile.`, 10000, "reset confirmation");
-        }
-
-        if (command === "setlevel") {
-            const setLevel = Number(args[1]);
-            if (!Number.isSafeInteger(setLevel) || setLevel < 1) {
-                return replyTemporary(message, "Enter a whole-number level of 1 or higher.", 10000, "setlevel validation response");
-            }
-            const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
-            initializeUserProgress(targetUser);
-            setUserLevel(targetUser, setLevel);
-            client.points.set(targetKey, targetUser);
-            return sendTemporary(message.channel, `${userMention.tag} has been set to Tier ${setLevel}.`, 10000, "setlevel confirmation");
-        }
-
-        if (command === "awardpower") {
-            const awardAmount = Number(args[1]?.replaceAll(",", ""));
-            if (!Number.isSafeInteger(awardAmount) || awardAmount < 1) {
-                return replyTemporary(message, "Enter a positive whole-number power award.", 10000, "awardpower validation response");
-            }
-            const reason = args.slice(2).join(" ").trim();
-            if (reason.length > 200) {
-                return replyTemporary(message, "Keep the award reason to 200 characters or fewer.", 10000, "awardpower reason validation response");
-            }
-
-            const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
-            initializeUserProgress(targetUser);
-            const awardedPower = targetUser.points + awardAmount;
-            if (!Number.isSafeInteger(awardedPower)) {
-                return replyTemporary(message, "That award would exceed the maximum supported power value.", 10000, "awardpower overflow response");
-            }
-
-            setBasePower(targetUser, awardedPower);
-            client.points.set(targetKey, targetUser);
-            awardAchievements(
-                { author: userMention, channel: message.channel },
-                targetUser,
-                getProgressAchievementIds(targetUser)
-            );
-
-            const tierLabel = targetUser.godki > 0
-                ? `God Tier ${getGodTierLevel(targetUser)}`
-                : `Tier ${targetUser.level}`;
-            const reasonText = reason ? ` Reason: ${reason.replace(/@/g, "@\u200b")}` : "";
-            return sendTemporary(
-                message.channel,
-                `${numeral(awardAmount).format("0,0")} base power awarded to ${userMention.tag}; their base power is now ${numeral(targetUser.points - 2500).format("0,0")} (${tierLabel}).${reasonText}`,
-                10000,
-                "awardpower confirmation"
-            );
-        }
-
-        const setPower = Number(args[1]?.replaceAll(",", ""));
-        if (!Number.isSafeInteger(setPower) || setPower < 2500) {
-            return replyTemporary(message, "Enter a whole-number base power of at least 2,500.", 10000, "setpower validation response");
-        }
-        const targetUser = client.points.get(targetKey) || createDefaultUser(userMention.id, message.guild.id, rightNow);
-        initializeUserProgress(targetUser);
-        setBasePower(targetUser, setPower);
-        client.points.set(targetKey, targetUser);
-        const tierLabel = targetUser.godki > 0
-            ? `God Tier ${getGodTierLevel(targetUser)}`
-            : `Tier ${targetUser.level}`;
-        return sendTemporary(
-            message.channel,
-            `${userMention.tag}'s base power is now ${numeral(setPower).format("0,0")} (${tierLabel}).`,
-            10000,
-            "setpower confirmation"
-        );
-    }
+    await handleAdminCommand({
+        client,
+        message,
+        command,
+        args,
+        now: rightNow,
+        replyTemporary,
+        sendTemporary,
+        awardAchievements
+    });
 }
 
 client.on("messageCreate", handleMessage);
@@ -1391,7 +1235,7 @@ client.on("interactionCreate", async (interaction) => {
             } else {
                 await interaction.reply({
                     content: "Scouter could not complete that command. Please try again shortly.",
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
         } catch (responseError) {

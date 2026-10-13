@@ -8,9 +8,9 @@ each Discord server.
 Commands use Discord's native `/` command picker. Scouter registers its global
 application commands at startup; initial registration can take some time to
 appear across Discord. See the [README command reference](../README.md#commands)
-for command options and setup. Replies are visible in the channel, but command
-invocations use Discord interactions rather than cluttering the channel with
-messages that the bot later deletes.
+for command options and setup. Most replies remain visible in the channel, while
+`/privacy` replies are private to the invoking member. Slash-command replies are
+not automatically deleted.
 
 ## Chat progression
 
@@ -86,6 +86,7 @@ existing base power; resetting creates a fresh profile.
   scanned, viewed, compared, or changed with owner controls while opted out.
 - **Privacy (`/privacy action:optin`):** Resume tracking; a new profile is created
   when the member next chats. Privacy choices are server-specific.
+- `/privacy` confirmations and instructions are only visible to the invoking member.
 - Progression data and opt-out preferences are stored locally in SQLite via
   Enmap. The database is excluded from Git; maintainers should back it up
   privately and follow the [backup and restore instructions](../README.md#data-backup-and-restore).

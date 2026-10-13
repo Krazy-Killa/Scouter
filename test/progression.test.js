@@ -413,8 +413,12 @@ test("rolls back the Enmap migration when a stored value is invalid", async () =
     const { migrateLegacyEnmapData } = require("../enmap-migration");
     const database = new Database(":memory:");
     database.exec("CREATE TABLE points (key text PRIMARY KEY, value text); CREATE TABLE privacy (key text PRIMARY KEY, value text)");
-    const legacyValue = JSON.stringify({ points: 2500 });
-    database.prepare("INSERT INTO points (key, value) VALUES (?, ?)").run("user", legacyValue);
+    const legacyValues = [
+        ["user", JSON.stringify({ points: 2500 })],
+        ["another-user", JSON.stringify({ points: 5000 })]
+    ];
+    const insertPoint = database.prepare("INSERT INTO points (key, value) VALUES (?, ?)");
+    for (const [key, value] of legacyValues) insertPoint.run(key, value);
     database.prepare("INSERT INTO privacy (key, value) VALUES (?, ?)").run("invalid", "{");
 
     try {
@@ -422,10 +426,22 @@ test("rolls back the Enmap migration when a stored value is invalid", async () =
             () => migrateLegacyEnmapData(database, stringify),
             /Cannot migrate Enmap table "privacy" record 1: stored value is not valid JSON/
         );
-        assert.equal(
-            database.prepare("SELECT value FROM points WHERE key = ?").get("user").value,
-            legacyValue
-        );
+        const readPoint = database.prepare("SELECT value FROM points WHERE key = ?");
+        for (const [key, value] of legacyValues) {
+            assert.equal(readPoint.get(key).value, value);
+        }
+    } finally {
+        database.close();
+    }
+});
+
+test("Enmap migration tolerates databases without either application table", () => {
+    const Database = require("better-sqlite3");
+    const { migrateLegacyEnmapData } = require("../enmap-migration");
+    const database = new Database(":memory:");
+
+    try {
+        assert.doesNotThrow(() => migrateLegacyEnmapData(database, JSON.stringify));
     } finally {
         database.close();
     }

@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { MessageFlags } = require("discord.js");
 const { client, handleInteraction, handleMessage, SLASH_COMMANDS } = require("../xp");
 const { createDefaultUser } = require("../progression");
 
@@ -82,7 +83,10 @@ function createInteraction(commandName, optionValues = {}, userId = "user") {
             getMember: (name) => name === "target" ? targetMember : null
         },
         inGuild: () => true,
-        deferReply: async () => { interaction.deferred = true; },
+        deferReply: async (options) => {
+            interaction.deferred = true;
+            interaction.deferReplyOptions = options;
+        },
         editReply: async (payload) => {
             const response = { payload, delete: async () => {} };
             fixture.sent.push(response);
@@ -133,7 +137,46 @@ test("slash interaction handles privacy opt-out and responds through the interac
     assert.equal(client.privacy.get(key), true);
     assert.equal(client.points.has(key), false);
     assert.equal(fixture.interaction.deferred, true);
+    assert.deepEqual(fixture.interaction.deferReplyOptions, { flags: MessageFlags.Ephemeral });
     assert.match(fixture.sent[0].payload, /saved progression record has been deleted/i);
+});
+
+test("slash command responses are not scheduled for deletion", async () => {
+    client.points.set("guild-user", createDefaultUser("user", "guild", 0));
+    const fixture = createInteraction("help");
+    const originalSetTimeout = global.setTimeout;
+    const scheduledTimers = [];
+    global.setTimeout = (callback, delay, ...args) => {
+        scheduledTimers.push({ callback, delay, args });
+        return { unref() {} };
+    };
+
+    try {
+        await handleInteraction(fixture.interaction);
+    } finally {
+        global.setTimeout = originalSetTimeout;
+    }
+
+    assert.equal(scheduledTimers.length, 0);
+    assert.equal(fixture.sent.length, 1);
+});
+
+test("slash response-send failures produce the interaction error response", async () => {
+    client.points.set("guild-user", createDefaultUser("user", "guild", 0));
+    const fixture = createInteraction("help");
+    const originalEditReply = fixture.interaction.editReply;
+    let firstResponse = true;
+    fixture.interaction.editReply = async (payload) => {
+        if (firstResponse) {
+            firstResponse = false;
+            throw new Error("interaction response failed");
+        }
+        return originalEditReply(payload);
+    };
+
+    await handleInteraction(fixture.interaction);
+
+    assert.match(fixture.sent.at(-1).payload, /could not complete that command/i);
 });
 
 test("slash transform passes five selected helpers to the first Saiyan SSG awakening", async () => {
@@ -186,6 +229,116 @@ test("legacy prefix text is not dispatched as a command", async () => {
     assert.equal(client.privacy.has("guild-user"), false);
     assert.equal(client.points.has("guild-user"), false);
     assert.equal(fixture.sent.length, 0);
+});
+
+test("scan returns a custom reading when the bot is selected", async () => {
+    client.user = {
+        id: "bot",
+        username: "Scouter",
+        displayAvatarURL: () => "https://example.invalid/bot.png"
+    };
+    const bot = {
+        id: client.user.id,
+        username: client.user.username,
+        displayAvatarURL: () => "https://example.invalid/bot.png"
+    };
+    const fixture = createMessage("!scan @Scouter", "viewer", bot);
+
+    await handleMessage(fixture.message);
+
+    const scanEmbed = fixture.sent[0].payload.embeds[0];
+    assert.equal(scanEmbed.data.title, "SCOUTER // SELF-SCAN");
+    assert.match(scanEmbed.data.description, /RECURSIVE SCAN DETECTED/);
+    assert.equal(scanEmbed.data.fields.find((field) => field.name === "Power reading").value, "OVER 9,000!");
+    assert.match(scanEmbed.data.fields.find((field) => field.name === "Result").value, /I do the scanning/);
+    assert.equal(scanEmbed.data.fields.some((field) => field.value.includes("Progression tracking is enabled")), false);
+});
+
+test("profile embed groups power, stamina, and progression into readable sections", async () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.points = 12500;
+    user.level = 2;
+    user.stamina = 7500;
+    user.staminaUpdatedAt = Date.now();
+    user.achievements = ["level_10"];
+    client.points.set("guild-user", user);
+
+    const fixture = createMessage("!profile");
+    await handleMessage(fixture.message);
+
+    const embed = fixture.sent[0].payload.embeds[0];
+    assert.match(embed.data.description, /\*\*Tier 2\*\* · Human\nNormal/);
+    assert.deepEqual(embed.data.fields.map((field) => field.name), [
+        "⚡ Power · Base → Form", "💪 Stamina", "📈 Progress"
+    ]);
+    assert.equal(embed.data.fields[0].value, "10,000 → 12,500");
+    assert.match(embed.data.fields[1].value, /7,500 \/ 10,000/);
+    assert.ok(embed.data.fields[1].value.includes(`🟢 ${"▰".repeat(8)}${"▱".repeat(2)}\n7,500 / 10,000`));
+    assert.ok(embed.data.fields[2].value.includes(`🔴 ▰${"▱".repeat(9)}\n2,000 / 17,000 (12%)\n15,000 power needed`));
+    assert.match(embed.data.fields[2].value, /Achievements:\*\* 1 \/ 20/);
+});
+
+test("compare embed presents both profiles in matching organized columns", async () => {
+    const targetUser = {
+        id: "target",
+        username: "target",
+        tag: "target#0001",
+        displayAvatarURL: () => "https://example.invalid/target.png"
+    };
+    const viewer = createDefaultUser("user", "guild", Date.now());
+    viewer.points = 12500;
+    viewer.level = 2;
+    viewer.stamina = 7500;
+    viewer.staminaUpdatedAt = Date.now();
+    viewer.achievements = ["level_10"];
+    client.points.set("guild-user", viewer);
+
+    const target = createDefaultUser("target", "guild", Date.now());
+    target.points = 22500;
+    target.level = 2;
+    target.stamina = 5000;
+    target.staminaUpdatedAt = Date.now();
+    client.points.set("guild-target", target);
+
+    const fixture = createMessage("!compare @target", "user", targetUser);
+    await handleMessage(fixture.message);
+
+    const embed = fixture.sent[0].payload.embeds[0];
+    assert.equal(embed.data.title, "Progression Comparison");
+    assert.deepEqual(embed.data.fields.map((field) => field.name), ["user", "target"]);
+    assert.equal(embed.data.fields[0].inline, true);
+    assert.equal(embed.data.fields[1].inline, true);
+    assert.match(embed.data.fields[0].value, /\*\*Tier 2 · Human\*\*[\s\S]*\*\*⚡ Power · Base → Form\*\*[\s\S]*10,000 → 12,500[\s\S]*\*\*💪 Stamina\*\*[\s\S]*7,500 \/ 10,000[\s\S]*\*\*📈 Progress\*\*[\s\S]*2,000 \/ 17,000 \(12%\)[\s\S]*Achievements · 1 \/ 20/);
+    assert.match(embed.data.fields[1].value, /\*\*Tier 2 · Human\*\*[\s\S]*20,000 → 22,500[\s\S]*\*\*💪 Stamina\*\*[\s\S]*5,000 \/ 10,000[\s\S]*12,000 \/ 17,000 \(71%\)/);
+    assert.ok(embed.data.fields[0].value.includes(`🟢 ${"▰".repeat(8)}${"▱".repeat(2)}\n7,500 / 10,000`));
+    assert.ok(embed.data.fields[0].value.includes(`🔴 ▰${"▱".repeat(9)}\n2,000 / 17,000 (12%)`));
+    assert.ok(embed.data.fields[1].value.includes(`🟡 ${"▰".repeat(5)}${"▱".repeat(5)}\n5,000 / 10,000`));
+    assert.ok(embed.data.fields[1].value.includes(`🟢 ${"▰".repeat(7)}${"▱".repeat(3)}\n12,000 / 17,000 (71%)`));
+});
+
+test("chat progression enforces cooldowns and repeated-message protection", async () => {
+    const originalRandom = Math.random;
+    Math.random = () => 0;
+    try {
+        await handleMessage(createMessage("first eligible message").message);
+        const user = client.points.get("guild-user");
+        const firstAward = user.points;
+        assert.ok(firstAward > 2500);
+        assert.equal(user.lastXpContent, "first eligible message");
+
+        await handleMessage(createMessage("different message during cooldown").message);
+        assert.equal(user.points, firstAward);
+
+        user.lastXpAt = Date.now() - 60 * 1000;
+        await handleMessage(createMessage(" FIRST   eligible message ").message);
+        assert.equal(user.points, firstAward);
+
+        await handleMessage(createMessage("different message after cooldown").message);
+        assert.ok(user.points > firstAward);
+        assert.equal(user.lastXpContent, "different message after cooldown");
+    } finally {
+        Math.random = originalRandom;
+    }
 });
 
 test("privacy opt-out blocks progression and opt-in starts a fresh record", async () => {

@@ -2,6 +2,25 @@
 
 Notable changes to Scouter are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `/spar` challenge flow: the target gets Accept/Decline buttons, the challenger
+  can cancel, challenges expire as declined after 5 minutes, and pending
+  challenges are persisted and restored after a restart. Combat outcomes are not
+  implemented yet.
+
+### Changed
+
+- Moved privacy, scanning, profile, comparison, help, achievements, leaderboard,
+  and training command handling into a dedicated user-command module.
+
+### Tests
+
+- Expanded command-flow coverage for ignored messages, stamina recovery in and
+  out of base form, and Discord member-lookup failures.
+
 ## [0.6.5] - 2026-10-21
 
 ### Changed

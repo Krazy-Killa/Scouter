@@ -5,18 +5,24 @@ with maintainer capacity and community feedback; no release dates are promised.
 
 ## Near term
 
-- **Strengthen reliability:** Expand automated coverage for message progression,
-  persistence, and failure cases. Current regression coverage includes chat
-  cooldowns and duplicate-message protection, plus transactional rollback when
-  stored Enmap data is invalid. Awakening tests also cover the full pity schedule
-  through its guaranteed attempt, and Saiyan ritual tests cover legacy and
-  missing helper profiles.
-- **Improve maintainability:** Keep moving command concerns out of `xp.js`
-  into focused modules without changing behavior. Slash-command registration
-  and interaction adaptation now live in `commands/slash-commands.js`; owner
-  progression controls live in `commands/admin.js`; race, transformation, and
-  Kaioken command flows now live in `commands/transformation.js`. Continue
-  extracting other command groups incrementally.
+- **Strengthen reliability:**
+  - **Done:** Regression coverage now exercises chat cooldowns and duplicate
+    messages; ignored bot, DM, legacy-prefix, and undersized messages; base-form
+    stamina recovery and transformed-form recovery behavior; training costs and
+    stamina exhaustion; privacy opt-out; Discord member-lookup and slash-response
+    failures; transactional rollback when stored Enmap data is invalid; the
+    complete awakening pity schedule through its guaranteed attempt; and Saiyan
+    ritual handling of legacy and missing helper profiles. Keep adding focused
+    regression tests when new behaviors or failure modes are introduced.
+- **Improve maintainability:**
+  - **Done:** Extracted slash-command registration and interaction adaptation
+    into `commands/slash-commands.js`; privacy, scanning, profile, comparison,
+    help, achievements, leaderboard, and training commands into
+    `commands/user-commands.js`; owner progression controls into
+    `commands/admin.js`; race, transformation, and Kaioken flows into
+    `commands/transformation.js`; and spar challenges into `commands/spar.js`.
+    `xp.js` now keeps command routing and shared message-progression lifecycle
+    logic rather than the command-specific implementations.
 
 ## Later
 
@@ -43,22 +49,38 @@ with maintainer capacity and community feedback; no release dates are promised.
   deliberately expand toward a broader RP bot. Gather community feedback and
   define a small, opt-in concept before committing to implementation. One
   possible experiment is consensual sparring:
-  - Start a challenge with a slash command, optionally allowing a mention or
-    reply to identify the target. Check that both players have progression
-    profiles and respect their privacy opt-outs; never start combat from a
-    mention or reply alone.
-  - Give each player a private consent prompt with Accept and Decline buttons.
-    The challenger can receive an ephemeral prompt, while the opponent may need
-    a DM because Discord does not allow a bot to send another user an ephemeral
-    reply. Handle disabled DMs explicitly rather than silently proceeding.
-  - Start only after both players accept. Only the two participants can use the
-    buttons; either may decline, and an unanswered challenge expires as
-    declined. Disable the buttons and update the challenge status after a
-    decision or timeout.
-  - Persist pending challenges and their expiry so a restart cannot leave an
-    invitation open indefinitely.
-  - Keep sparring outcomes temporary and cosmetic, with no loss of permanent
-    progression. Define cooldowns and a way to decline or disable challenges.
+  - Add a message context-menu command (right-click a message, then Apps,
+    then "Challenge to Spar"). The target is the message author, and the
+    challenger gets an ephemeral confirm/cancel prompt. Confirming starts the
+    same consent flow as `/spar`, with the same profile, opt-out, DM-failure
+    and timeout rules. A plain reply cannot get an ephemeral prompt because it
+    is not an interaction.
+  - **Done:** `/spar target` posts a consent challenge in the channel with
+    Accept, Decline and Cancel buttons. Only the target can accept or decline,
+    only the challenger can cancel, and an unanswered challenge expires as
+    declined after 5 minutes. Buttons are disabled and the embed updated after
+    each outcome. Both players need profiles and must not be opted out, and
+    each player can have one pending challenge. Pending challenges are
+    persisted in the `sparChallenges` table and re-timed after a restart.
+  - Consider a private prompt for the opponent. Discord only allows ephemeral
+    replies to the person who ran the command, so this would need a DM, with
+    disabled DMs handled explicitly rather than silently proceeding.
+  - Add the combat bout, started once the target accepts (currently accepting
+    only closes the challenge). Proposed design:
+    - Automatic and narrated: 3-5 rounds shown by editing one embed, with a
+      result card showing effective power (`points x transformation`). No
+      move buttons, HP, damage or crits.
+    - Power-weighted randomness: the stronger fighter's chance per round is
+      capped (around 35-65%) on a ratio or log curve so upsets stay possible
+      and weaker players are not discouraged from accepting.
+    - Race perks (for example Saiyan comebacks) are a later addition.
+    - Stakes are temporary and cosmetic: no change to power or tier, and no
+      loot. Optionally charge a small equal stamina cost, blocking spars when
+      it is too low, and track win/loss counts with a few achievements.
+    - Add a per-pair cooldown (around 10 minutes) and a way to disable
+      challenges.
+    - Open questions: stamina cost or free, recorded results or not, and how
+      strongly the stronger fighter should be favored.
 
 ## Guiding principles
 

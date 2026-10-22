@@ -1,0 +1,90 @@
+name: Prepare GitHub Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Test and package release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify release version and changelog
+        id: release
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          if [[ "$VERSION" != "$TAG_VERSION" ]]; then
+            echo "::error::Tag version $TAG_VERSION does not match package.json version $VERSION."
+            exit 1
+          fi
+
+          if ! grep -Fq "## [$VERSION]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no release section for version $VERSION."
+            exit 1
+          fi
+
+          awk -v heading="## [$VERSION]" '
+            index($0, heading) == 1 { in_section = 1; next }
+            in_section && /^## / { exit }
+            in_section { print }
+          ' CHANGELOG.md > release-notes.md
+
+          if [[ ! -s release-notes.md ]]; then
+            echo "::error::The changelog section for version $VERSION is empty."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create source package
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          ARCHIVE="Scouter-${VERSION}.zip"
+          git archive \
+            --format=zip \
+            --prefix="Scouter-${VERSION}/" \
+            "$GITHUB_SHA" > "$ARCHIVE"
+
+          if unzip -Z1 "$ARCHIVE" \
+            | grep -E '(^|/)(\.env($|\.)|config\.json$|data/|node_modules/)' \
+            | grep -vE '(^|/)\.env\.example$'; then
+            echo "::error::The release package contains local configuration or runtime data."
+            exit 1
+          fi
+
+          echo "RELEASE_ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$RELEASE_ARCHIVE" \
+            --draft \
+            --title "Scouter ${VERSION}" \
+            --notes-file release-notes.md

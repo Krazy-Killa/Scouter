@@ -32,6 +32,22 @@ Before the first start after upgrading to Enmap 6, stop the bot and back up the 
 
 Do not commit your real token. Keep `.env` and any local `config.json` out of Git; both are ignored in this repo.
 
+### Releases
+
+Feature work remains unreleased until a version is explicitly prepared. To
+publish a version, update the version in `package.json` and `package-lock.json`,
+move its notes from the Unreleased section of `CHANGELOG.md` into a matching
+version heading, then commit and push the changes with a matching `vX.Y.Z` tag
+(for example, `v0.7.0`). The tag starts the release workflow, which installs
+locked dependencies, runs the test suite, verifies the tag/version/changelog
+match, and attaches a source ZIP to a **draft** GitHub Release. Review the draft
+and package in GitHub, then publish it when ready.
+
+The ZIP contains tracked project files, including setup instructions, source,
+tests, and the dependency lockfile. It excludes ignored local configuration,
+credentials, runtime data, and installed dependencies. Install its dependencies
+with `npm ci`; Node.js 20 or newer is required.
+
 ### Discord permissions and intent
 
 When inviting the bot, include the `bot` and `applications.commands` OAuth2 scopes so Discord can install its slash commands.
@@ -71,6 +87,7 @@ are not automatically deleted.
 | `/leaderboard` | — | Shows all-time server rankings, 10 users per page, ordered by displayed power. Use the left and right reactions to change pages. |
 | `/achievements` | — | Lists unlocked and locked achievements. |
 | `/train` | — | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
+| `/spar` | Required `target` | Challenges a member to a friendly spar. Only the challenged member can accept or decline with buttons, the challenger can cancel, and unanswered challenges expire as declined after 5 minutes. Both members need profiles and cannot be opted out. Combat results are not implemented yet. |
 | `/transform` | Required `form`; optional `helper1`–`helper5` | Changes to an unlocked racial or universal transformation. Select five distinct other Saiyan helpers at Tier 21 or higher for a first-time SSG awakening. |
 | `/kaioken` | Required `level` | Activates x2/x3/x4/x10 or disables the universal Kaioken ability. |
 | `/revert` | — | Automatically returns you to your normal form (Beyond God if you have God Ki). |

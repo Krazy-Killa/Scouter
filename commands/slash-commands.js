@@ -31,6 +31,8 @@ function createSlashCommands() {
         new SlashCommandBuilder().setName("leaderboard").setDescription("Show this server's power rankings."),
         new SlashCommandBuilder().setName("achievements").setDescription("View your progression achievements."),
         new SlashCommandBuilder().setName("train").setDescription("Trade stamina for a training reward."),
+        new SlashCommandBuilder().setName("spar").setDescription("Challenge a member to a friendly spar.")
+            .addUserOption((option) => option.setName("target").setDescription("Member to challenge").setRequired(true)),
         new SlashCommandBuilder().setName("transform").setDescription("Change to an unlocked transformation.")
             .addStringOption((option) => option.setName("form").setDescription("Transformation to use").setRequired(true)
                 .addChoices(...TRANSFORM_CHOICES.map(([value, name]) => ({ name, value }))))

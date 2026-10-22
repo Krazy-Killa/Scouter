@@ -1,9 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { MessageFlags } = require("discord.js");
-const { client, handleInteraction, handleMessage, SLASH_COMMANDS } = require("../xp");
+const { client, handleButtonInteraction, handleInteraction, handleMessage, SLASH_COMMANDS } = require("../xp");
 const { createDefaultUser } = require("../progression");
 const { slashCommandCooldowns } = require("../commands/slash-commands");
+const { SPAR_CHALLENGE_TTL_MS, expireChallenge } = require("../commands/spar");
 
 class TestStore extends Map {
     filter(predicate) {
@@ -117,6 +118,7 @@ function createInteraction(commandName, optionValues = {}, userId = "user") {
 test.beforeEach(() => {
     client.points = new TestStore();
     client.privacy = new TestStore();
+    client.sparChallenges = new TestStore();
     client.user = { displayAvatarURL: () => "https://example.invalid/bot.png" };
     slashCommandCooldowns.clear();
 });
@@ -125,7 +127,7 @@ test("registers the complete guild-only slash command set", () => {
     const commands = SLASH_COMMANDS.map((command) => command.toJSON());
     assert.deepEqual(commands.map((command) => command.name), [
         "help", "scan", "profile", "compare", "leaderboard", "achievements",
-        "train", "transform", "kaioken", "revert", "race", "privacy",
+        "train", "spar", "transform", "kaioken", "revert", "race", "privacy",
         "setlevel", "setpower", "awardpower", "reset"
     ]);
     const transform = commands.find((command) => command.name === "transform");
@@ -133,6 +135,22 @@ test("registers the complete guild-only slash command set", () => {
         "form", "helper1", "helper2", "helper3", "helper4", "helper5"
     ]);
     assert.equal(commands.every((command) => command.dm_permission === false), true);
+});
+
+test("help and achievements commands are served by the extracted user-command handlers", async () => {
+    client.points.set("guild-user", createDefaultUser("user", "guild", 0));
+    const help = createInteraction("help");
+    await handleInteraction(help.interaction);
+    const helpEmbed = help.sent[0].payload.embeds[0];
+    assert.equal(helpEmbed.data.title, "Command List");
+    assert.ok(helpEmbed.data.fields.some((field) => field.name === "/spar target"));
+
+    slashCommandCooldowns.clear();
+    const achievements = createInteraction("achievements");
+    await handleInteraction(achievements.interaction);
+    const achievementEmbed = achievements.sent[0].payload.embeds[0];
+    assert.ok(achievementEmbed.data.fields.length > 0);
+    assert.match(achievementEmbed.data.footer.text, /of \d+ unlocked/);
 });
 
 test("slash interaction handles privacy opt-out and responds through the interaction", async () => {
@@ -471,6 +489,70 @@ test("chat progression enforces cooldowns and repeated-message protection", asyn
     } finally {
         Math.random = originalRandom;
     }
+});
+
+test("message progression ignores bots, DMs, legacy commands, and messages below the size threshold", async () => {
+    const botMessage = createMessage("A bot message");
+    botMessage.message.author.bot = true;
+    await handleMessage(botMessage.message);
+    assert.equal(client.points.has("guild-user"), false);
+
+    const directMessage = createMessage("A direct message");
+    directMessage.message.guild = null;
+    await handleMessage(directMessage.message);
+    assert.equal(client.points.has("guild-user"), false);
+
+    const legacyCommand = createMessage("!train");
+    legacyCommand.message.isSlashCommand = false;
+    await handleMessage(legacyCommand.message);
+    assert.equal(client.points.has("guild-user"), false);
+
+    await handleMessage(createMessage("x").message);
+    const user = client.points.get("guild-user");
+    assert.ok(user);
+    assert.equal(user.points, 2500);
+    assert.equal(user.lastXpAt, 0);
+});
+
+test("profile requests recover stamina only in base form and persist the recovery timestamp", async () => {
+    const baseFormUser = createDefaultUser("user", "guild", 0);
+    baseFormUser.stamina = 4000;
+    baseFormUser.staminaUpdatedAt = Date.now() - 24 * 60 * 60 * 1000;
+    client.points.set("guild-user", baseFormUser);
+
+    await handleMessage(createMessage("!profile").message);
+    assert.ok(Math.abs(baseFormUser.stamina - 6000) < 1);
+    assert.ok(baseFormUser.staminaUpdatedAt >= Date.now() - 1000);
+
+    const transformedUser = createDefaultUser("user", "guild", 0);
+    transformedUser.transformationForm = "potential";
+    transformedUser.transformation = 100;
+    transformedUser.stamina = 4000;
+    transformedUser.staminaUpdatedAt = Date.now() - 24 * 60 * 60 * 1000;
+    client.points.set("guild-user", transformedUser);
+
+    await handleMessage(createMessage("!profile").message);
+    assert.equal(transformedUser.stamina, 4000);
+    assert.ok(transformedUser.staminaUpdatedAt >= Date.now() - 1000);
+});
+
+test("scan reports a temporary lookup failure when Discord cannot fetch a member", async () => {
+    const fixture = createMessage("!scan 12345678901234567");
+    fixture.message.guild.members.fetch = async () => {
+        const error = new Error("Discord API unavailable");
+        error.code = 50013;
+        throw error;
+    };
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    try {
+        await handleMessage(fixture.message);
+    } finally {
+        console.error = originalConsoleError;
+    }
+
+    assert.match(getResponseText(fixture.replied[0]), /could not complete the scan/i);
+    assert.equal(fixture.sent.length, 0);
 });
 
 test("privacy opt-out blocks progression and opt-in starts a fresh record", async () => {
@@ -1137,4 +1219,158 @@ test("scan, profile, and compare do not expose opted-out members' records", asyn
         assert.match(getResponseText(lookup.replied[0]), /opted out of progression tracking/i);
         assert.equal(lookup.sent.length, 0);
     }
+});
+
+const sparUser = (id) => ({
+    id,
+    username: id,
+    bot: false,
+    displayAvatarURL: () => "https://example.invalid/avatar.png"
+});
+
+function createButton(action, challengeId, userId, guildId = "guild") {
+    const responses = { updates: [], replies: [] };
+    return {
+        interaction: {
+            customId: `spar:${action}:${challengeId}`,
+            user: { id: userId },
+            guildId,
+            update: async (payload) => responses.updates.push(payload),
+            reply: async (payload) => responses.replies.push(payload)
+        },
+        ...responses
+    };
+}
+
+async function startSpar(challengerId = "challenger", opponentId = "opponent") {
+    client.points.set(`guild-${challengerId}`, createDefaultUser(challengerId, "guild", 0));
+    client.points.set(`guild-${opponentId}`, createDefaultUser(opponentId, "guild", 0));
+    const fixture = createInteraction("spar", { target: sparUser(opponentId) }, challengerId);
+    slashCommandCooldowns.clear();
+    await handleInteraction(fixture.interaction);
+    return fixture;
+}
+
+test("spar posts a consent challenge that only pings the opponent and is persisted", async () => {
+    const fixture = await startSpar();
+
+    const payload = fixture.sent[0].payload;
+    assert.equal(fixture.interaction.deferReplyOptions, undefined);
+    assert.deepEqual(payload.allowedMentions, { users: ["opponent"] });
+    assert.match(payload.embeds[0].data.description, /<@challenger> challenges <@opponent>/);
+    const buttons = payload.components[0].components.map((button) => button.data);
+    assert.deepEqual(buttons.map((button) => button.label), ["Accept", "Decline", "Cancel challenge"]);
+    assert.equal(buttons.every((button) => !button.disabled), true);
+
+    const [challenge] = client.sparChallenges.filter(() => true);
+    assert.equal(challenge.challengerID, "challenger");
+    assert.equal(challenge.opponentID, "opponent");
+    assert.equal(challenge.expiresAt - challenge.createdAt, SPAR_CHALLENGE_TTL_MS);
+    assert.equal(buttons[0].custom_id, `spar:accept:${challenge.id}`);
+});
+
+test("spar rejects invalid, unavailable, and already-pending targets without creating a challenge", async () => {
+    client.points.set("guild-challenger", createDefaultUser("challenger", "guild", 0));
+    client.points.set("guild-opponent", createDefaultUser("opponent", "guild", 0));
+    client.points.set("guild-busy", createDefaultUser("busy", "guild", 0));
+    client.privacy.set("guild-private", true);
+    client.points.set("guild-private", createDefaultUser("private", "guild", 0));
+
+    const attempt = async (target, userId = "challenger") => {
+        slashCommandCooldowns.clear();
+        const fixture = createInteraction("spar", { target }, userId);
+        await handleInteraction(fixture.interaction);
+        return getResponseText(fixture.sent[0]);
+    };
+
+    assert.match(await attempt(sparUser("challenger")), /can't spar with yourself/i);
+    assert.match(await attempt({ ...sparUser("bot"), bot: true }), /bots can't be challenged/i);
+    assert.match(await attempt(sparUser("nobody")), /can't be challenged to a spar right now/i);
+    assert.match(await attempt(sparUser("private")), /can't be challenged to a spar right now/i);
+    assert.equal(client.sparChallenges.size, 0);
+
+    await attempt(sparUser("opponent"));
+    assert.equal(client.sparChallenges.size, 1);
+    assert.match(await attempt(sparUser("busy")), /already have a pending/i);
+    assert.match(await attempt(sparUser("challenger"), "busy"), /already has a pending/i);
+    assert.equal(client.sparChallenges.size, 1);
+});
+
+test("only the opponent can accept a spar and it resolves exactly once", async () => {
+    await startSpar();
+    const [challenge] = client.sparChallenges.filter(() => true);
+
+    const intruder = createButton("accept", challenge.id, "stranger");
+    await handleButtonInteraction(intruder.interaction);
+    assert.equal(intruder.updates.length, 0);
+    assert.equal(intruder.replies[0].flags, MessageFlags.Ephemeral);
+    assert.equal(client.sparChallenges.size, 1);
+
+    const accept = createButton("accept", challenge.id, "opponent");
+    await handleButtonInteraction(accept.interaction);
+    const update = accept.updates[0];
+    assert.match(update.embeds[0].data.description, /accepted/i);
+    assert.equal(update.components[0].components.every((button) => button.data.disabled), true);
+    assert.deepEqual(update.allowedMentions, { users: [] });
+    assert.equal(client.sparChallenges.size, 0);
+
+    const repeat = createButton("accept", challenge.id, "opponent");
+    await handleButtonInteraction(repeat.interaction);
+    assert.equal(repeat.updates.length, 0);
+    assert.match(getResponseText({ payload: repeat.replies[0] }), /no longer active/i);
+});
+
+test("the opponent can decline and only the challenger can cancel a spar", async () => {
+    await startSpar();
+    const [challenge] = client.sparChallenges.filter(() => true);
+
+    const wrongCancel = createButton("cancel", challenge.id, "opponent");
+    await handleButtonInteraction(wrongCancel.interaction);
+    assert.equal(wrongCancel.updates.length, 0);
+    assert.equal(client.sparChallenges.size, 1);
+
+    const cancel = createButton("cancel", challenge.id, "challenger");
+    await handleButtonInteraction(cancel.interaction);
+    assert.match(cancel.updates[0].embeds[0].data.description, /cancelled/i);
+    assert.equal(client.sparChallenges.size, 0);
+
+    await startSpar();
+    const [second] = client.sparChallenges.filter(() => true);
+    const decline = createButton("decline", second.id, "opponent");
+    await handleButtonInteraction(decline.interaction);
+    assert.match(decline.updates[0].embeds[0].data.description, /declined/i);
+    assert.equal(client.sparChallenges.size, 0);
+});
+
+test("accepting a spar after a fighter opts out closes it as unavailable", async () => {
+    await startSpar();
+    const [challenge] = client.sparChallenges.filter(() => true);
+    client.privacy.set("guild-challenger", true);
+
+    const accept = createButton("accept", challenge.id, "opponent");
+    await handleButtonInteraction(accept.interaction);
+
+    assert.match(accept.updates[0].embeds[0].data.description, /no longer available/i);
+    assert.equal(client.sparChallenges.size, 0);
+});
+
+test("expired spar challenges decline on click and are closed by the expiry handler", async () => {
+    await startSpar();
+    const [challenge] = client.sparChallenges.filter(() => true);
+    challenge.expiresAt = Date.now() - 1;
+
+    const late = createButton("accept", challenge.id, "opponent");
+    await handleButtonInteraction(late.interaction);
+    assert.match(late.updates[0].embeds[0].data.description, /did not respond in time/i);
+    assert.equal(client.sparChallenges.size, 0);
+
+    const edits = [];
+    const tracked = { ...challenge, id: "tracked", channelID: "channel", messageID: "message" };
+    client.sparChallenges.set(tracked.id, tracked);
+    client.channels = {
+        fetch: async () => ({ messages: { fetch: async () => ({ edit: async (payload) => edits.push(payload) }) } })
+    };
+    await expireChallenge(client, tracked.id);
+    assert.equal(client.sparChallenges.size, 0);
+    assert.match(edits[0].embeds[0].data.description, /did not respond in time/i);
 });

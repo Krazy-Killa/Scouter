@@ -8,6 +8,8 @@ Notable changes to Scouter are documented here.
 
 - Moved race, transformation, Kaioken, and revert command handling into a
   dedicated command module without changing command behavior.
+- Hid the God Ki awakening odds from attempt responses and user-facing
+  documentation.
 - Updated the roadmap to reflect completed reliability and maintainability work.
 
 ### Tests

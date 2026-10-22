@@ -256,6 +256,7 @@ test("slash transform passes five selected helpers to the first Saiyan SSG awake
     for (const helper of helpers) {
         const profile = createDefaultUser(helper.id, "guild", 0);
         profile.race = "saiyan";
+        profile.level = 21;
         client.points.set(`guild-${helper.id}`, profile);
     }
     const fixture = createInteraction("transform", {
@@ -299,6 +300,7 @@ test("slash transform requires five distinct helpers for the first Saiyan SSG aw
     const helper = { id: "helper", username: "helper" };
     const helperProfile = createDefaultUser(helper.id, "guild", 0);
     helperProfile.race = "saiyan";
+    helperProfile.level = 21;
     client.points.set(`guild-${helper.id}`, helperProfile);
 
     const fixture = createInteraction("transform", {
@@ -511,6 +513,7 @@ test("SSGSS command requires God Tier 15 after awakening God Ki", async () => {
     for (const helper of helpers) {
         const helperProfile = createDefaultUser(helper.id, "guild", 0);
         helperProfile.race = "saiyan";
+        helperProfile.level = 21;
         client.points.set(`guild-${helper.id}`, helperProfile);
     }
     await handleMessage(createMessage("!transform ssg", "user", helpers).message);
@@ -571,22 +574,26 @@ test("Beyond God awakening persists every pity step through the guaranteed attem
     const originalNow = Date.now;
     const originalRandom = Math.random;
     let now = 13 * 60 * 60 * 1000;
-    const chanceSchedule = [5, 5, 5, 5, 10, 20, 40, 80, 100];
+    const totalAttemptsUntilGuaranteed = 9;
     Date.now = () => now;
     Math.random = () => 0.99;
 
     try {
-        for (const [index, chance] of chanceSchedule.entries()) {
+        for (let index = 0; index < totalAttemptsUntilGuaranteed; index += 1) {
             const attempt = createMessage("!transform beyondgod");
             await handleMessage(attempt.message);
 
-            assert.equal(client.points.get("guild-user").godki, index === chanceSchedule.length - 1 ? 50 : 0);
+            const isGuaranteedAttempt = index === totalAttemptsUntilGuaranteed - 1;
+            assert.equal(client.points.get("guild-user").godki, isGuaranteedAttempt ? 50 : 0);
             assert.equal(
                 client.points.get("guild-user").godKiAwakeningAttempts,
-                index === chanceSchedule.length - 1 ? 0 : index + 1
+                isGuaranteedAttempt ? 0 : index + 1
             );
-            if (index < chanceSchedule.length - 1) {
-                assert.match(getResponseText(attempt.sent[0]), new RegExp(`\\(${chance}% chance\\)`));
+            if (!isGuaranteedAttempt) {
+                const responseText = getResponseText(attempt.sent[0]);
+                assert.match(responseText, /attempt to awaken God Ki failed/i);
+                assert.match(responseText, /try again in 12 hours/i);
+                assert.doesNotMatch(responseText, /chance|%/i);
                 now += 12 * 60 * 60 * 1000;
             }
         }
@@ -611,6 +618,7 @@ test("first Saiyan SSG awakening requires five other persisted Saiyan profiles",
     for (const helper of helpers) {
         const profile = createDefaultUser(helper.id, "guild", 0);
         profile.race = "saiyan";
+        profile.level = 21;
         client.points.set(`guild-${helper.id}`, profile);
     }
     await handleMessage(createMessage("!transform ssg", "user", helpers).message);
@@ -627,6 +635,7 @@ test("first Saiyan SSG awakening initializes and persists legacy helper profiles
     for (const helper of helpers) {
         const profile = createDefaultUser(helper.id, "guild", 0);
         delete profile.race;
+        profile.level = 21;
         delete profile.godKiAwakeningAttempts;
         delete profile.lastGodKiAwakeningAttemptAt;
         client.points.set(`guild-${helper.id}`, profile);
@@ -669,6 +678,7 @@ test("first Saiyan SSG awakening rejects non-Saiyan helpers", async () => {
     helpers.forEach((helper, index) => {
         const profile = createDefaultUser(helper.id, "guild", 0);
         profile.race = index === 0 ? "human" : "saiyan";
+        profile.level = 21;
         client.points.set(`guild-${helper.id}`, profile);
     });
 
@@ -676,6 +686,27 @@ test("first Saiyan SSG awakening rejects non-Saiyan helpers", async () => {
     await handleMessage(attempt.message);
     assert.equal(saiyan.godki, 0);
     assert.match(getResponseText(attempt.replied[0]), /all five helpers must be Saiyans/i);
+});
+
+test("first Saiyan SSG awakening requires each helper to be at least Tier 21", async () => {
+    const saiyan = createDefaultUser("user", "guild", 0);
+    saiyan.race = "saiyan";
+    saiyan.level = 50;
+    client.points.set("guild-user", saiyan);
+    const helpers = Array.from({ length: 5 }, (_, index) => ({ id: `tier-${index}`, username: `tier-${index}` }));
+    helpers.forEach((helper, index) => {
+        const profile = createDefaultUser(helper.id, "guild", 0);
+        profile.race = "saiyan";
+        profile.level = index === 4 ? 20 : 21;
+        client.points.set(`guild-${helper.id}`, profile);
+    });
+
+    const attempt = createMessage("!transform ssg", "user", helpers);
+    await handleMessage(attempt.message);
+
+    assert.equal(saiyan.godki, 0);
+    assert.equal(saiyan.transformationForm, "normal");
+    assert.match(getResponseText(attempt.replied[0]), /all five Saiyan helpers must be at least Tier 21/i);
 });
 
 test("high overall level cannot bypass the God Ki awakening requirement", async () => {

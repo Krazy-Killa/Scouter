@@ -624,7 +624,7 @@ async function handleMessage(message) {
                 { name: "/achievements", value: "Shows your unlocked achievements and progress.", inline: true },
                 { name: "/privacy action", value: "Opt out of progression tracking and delete your record, or opt in again.", inline: true },
                 { name: "/race race", value: `Choose Saiyan, Human, Namekian, or Frieza Race before reaching ${formatPowerAmount(RACE_LOCK_BASE_POWER)} base power.` },
-                { name: "/transform form", value: "Change your form. Beyond God attempts to awaken God Ki at Tier 50. First-time Saiyan SSG awakening requires five distinct other Saiyan helpers." },
+                { name: "/transform form", value: "Change your form. Beyond God attempts to awaken God Ki at Tier 50. First-time Saiyan SSG awakening requires five distinct other Saiyans at Tier 21+." },
                 { name: "/kaioken level", value: "Activate or disable the universal Kaioken ability. Stamina drain is amplified when stacked with another form." },
                 { name: "/revert", value: "Automatically reverts you to your normal form." },
                 { name: "/train", value: "Trade stamina for a large one-time power boost. Training is available once per day." },

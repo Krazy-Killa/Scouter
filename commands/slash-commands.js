@@ -34,11 +34,11 @@ function createSlashCommands() {
         new SlashCommandBuilder().setName("transform").setDescription("Change to an unlocked transformation.")
             .addStringOption((option) => option.setName("form").setDescription("Transformation to use").setRequired(true)
                 .addChoices(...TRANSFORM_CHOICES.map(([value, name]) => ({ name, value }))))
-            .addUserOption((option) => option.setName("helper1").setDescription("Distinct Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper2").setDescription("Distinct Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper3").setDescription("Distinct Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper4").setDescription("Distinct Saiyan helper for your first SSG awakening"))
-            .addUserOption((option) => option.setName("helper5").setDescription("Distinct Saiyan helper for your first SSG awakening")),
+            .addUserOption((option) => option.setName("helper1").setDescription("Tier 21+ Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper2").setDescription("Tier 21+ Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper3").setDescription("Tier 21+ Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper4").setDescription("Tier 21+ Saiyan helper for your first SSG awakening"))
+            .addUserOption((option) => option.setName("helper5").setDescription("Tier 21+ Saiyan helper for your first SSG awakening")),
         new SlashCommandBuilder().setName("kaioken").setDescription("Activate or disable Kaioken.")
             .addStringOption((option) => option.setName("level").setDescription("Kaioken multiplier")
                 .setRequired(true)

@@ -42,8 +42,23 @@ with maintainer capacity and community feedback; no release dates are promised.
   Scouter's focused power-progression identity or whether the project should
   deliberately expand toward a broader RP bot. Gather community feedback and
   define a small, opt-in concept before committing to implementation. One
-  possible experiment is consensual sparring with temporary outcomes that
-  cannot remove permanent progression.
+  possible experiment is consensual sparring:
+  - Start a challenge with a slash command, optionally allowing a mention or
+    reply to identify the target. Check that both players have progression
+    profiles and respect their privacy opt-outs; never start combat from a
+    mention or reply alone.
+  - Give each player a private consent prompt with Accept and Decline buttons.
+    The challenger can receive an ephemeral prompt, while the opponent may need
+    a DM because Discord does not allow a bot to send another user an ephemeral
+    reply. Handle disabled DMs explicitly rather than silently proceeding.
+  - Start only after both players accept. Only the two participants can use the
+    buttons; either may decline, and an unanswered challenge expires as
+    declined. Disable the buttons and update the challenge status after a
+    decision or timeout.
+  - Persist pending challenges and their expiry so a restart cannot leave an
+    invitation open indefinitely.
+  - Keep sparring outcomes temporary and cosmetic, with no loss of permanent
+    progression. Define cooldowns and a way to decline or disable challenges.
 
 ## Guiding principles
 

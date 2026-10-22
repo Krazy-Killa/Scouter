@@ -36,6 +36,8 @@ const KAIOKEN_RULES = {
     10: { command: "x10", minLevel: 20, messageDrain: 25, trainingCost: 3000, trainingMultiplier: 50, trainingPenalty: 0.1 }
 };
 
+const SSG_HELPER_MIN_LEVEL = 21;
+
 function formatCooldownRemaining(milliseconds) {
     if (milliseconds < 60 * 60 * 1000) {
         return `about ${Math.ceil(milliseconds / (60 * 1000))} minute(s)`;
@@ -256,7 +258,7 @@ async function handleTransformationCommand({
                 client.points.set(key, user);
                 await sendTemporary(
                     message.channel,
-                    `Your attempt to awaken God Ki failed (${Math.round(chance * 100)}% chance). Try again in 12 hours. Your chance will rise after four failed attempts.`,
+                    "Your attempt to awaken God Ki failed. Try again in 12 hours.",
                     10000,
                     "God Ki awakening failure response"
                 );
@@ -317,6 +319,15 @@ async function handleTransformationCommand({
                         "All five helpers must be Saiyans.",
                         10000,
                         "SSG awakening helper race response"
+                    );
+                    return true;
+                }
+                if (profile.level < SSG_HELPER_MIN_LEVEL) {
+                    await replyTemporary(
+                        message,
+                        `All five Saiyan helpers must be at least Tier ${SSG_HELPER_MIN_LEVEL}.`,
+                        10000,
+                        "SSG awakening helper level response"
                     );
                     return true;
                 }

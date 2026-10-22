@@ -8,18 +8,25 @@ with maintainer capacity and community feedback; no release dates are promised.
 - **Strengthen reliability:** Expand automated coverage for message progression,
   persistence, and failure cases. Current regression coverage includes chat
   cooldowns and duplicate-message protection, plus transactional rollback when
-  stored Enmap data is invalid.
+  stored Enmap data is invalid. Awakening tests also cover the full pity schedule
+  through its guaranteed attempt, and Saiyan ritual tests cover legacy and
+  missing helper profiles.
 - **Improve maintainability:** Keep moving command concerns out of `xp.js`
   into focused modules without changing behavior. Slash-command registration
   and interaction adaptation now live in `commands/slash-commands.js`; owner
-  progression controls live in `commands/admin.js`. Continue extracting other
-  command groups incrementally.
+  progression controls live in `commands/admin.js`; race, transformation, and
+  Kaioken command flows now live in `commands/transformation.js`. Continue
+  extracting other command groups incrementally.
 
 ## Later
 
 - **Review progression balance:** Use player feedback and observed play patterns
   to evaluate leveling pace, stamina costs, training rewards, and race/form
   balance before changing established values.
+- **Explore a Ki resource:** Consider a Ki bar for distinct abilities or
+  techniques, keeping it separate from stamina's role in physical training and
+  transformation upkeep. Define meaningful Ki uses and recovery rules before
+  implementation; avoid adding a meter that only duplicates stamina upkeep.
 - **Add daily and weekly objectives:** Offer optional goals around earning
   power, training, or tier milestones. Start with cosmetic or otherwise
   carefully capped rewards to avoid disrupting progression balance.

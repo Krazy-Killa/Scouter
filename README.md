@@ -55,9 +55,12 @@ The bot also needs the **Message Content Intent** enabled under **Developer Port
 ## Commands
 
 Use Discord's `/` command picker. Scouter no longer handles prefix commands.
-Most command responses remain visible in the channel; `/privacy` replies are
-private to the invoking member. Slash-command invocations themselves do not
-create command messages, and bot responses are not automatically deleted.
+Most command responses remain visible in the channel. Replies to `/privacy`,
+`/revert`, `/transform`, and `/kaioken` are private to the invoking member.
+Slash-command invocations do not create command messages, and bot responses
+are not automatically deleted.
+
+### User commands
 
 | Command | Options | Description |
 |---|---|---|
@@ -73,14 +76,25 @@ create command messages, and bot responses are not automatically deleted.
 | `/revert` | — | Automatically returns you to your normal form (Beyond God if you have God Ki). |
 | `/race` | Required `race` | Changes your race while your base power is below 1,000,000. Race changes permanently lock at that threshold. |
 | `/privacy` | Required `action` | Opts out of progression tracking in this server and deletes your saved record, or opts back in to start a new record. |
-| `/setlevel` | Required `target`, `level` | Sets a user's tier without changing accumulated power. Server owner only. |
-| `/setpower` | Required `target`, `power` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500. Server owner only. |
-| `/awardpower` | Required `target`, `amount`; optional `reason` | Adds a positive whole-number amount to a member's base power, recalculates their tier, and checks progression achievements. Server owner only. |
-| `/reset` | Required `target` | Resets an existing profile to its fresh starting state. Server owner only. |
 
-`setlevel` changes only the tier, `setpower` replaces base power and recalculates the tier, and `awardpower` adds to base power. Administrative commands cannot modify a member who opted out of progression tracking. Command invocations are native Discord interactions; bot responses remain visible in the channel as before.
+### Admin commands
 
-For leaderboards with multiple pages, use the left and right reactions beneath the leaderboard to navigate. The controls are available to the person who ran the command for two minutes.
+The following commands are restricted to the server owner. They cannot modify
+members who opted out of progression tracking.
+
+| Command | Options | Description |
+|---|---|---|
+| `/setlevel` | Required `target`, `level` | Sets a user's tier without changing accumulated power. |
+| `/setpower` | Required `target`, `power` | Sets a user's base power and recalculates their tier. Requires a whole number of at least 2,500. |
+| `/awardpower` | Required `target`, `amount`; optional `reason` | Adds a positive whole-number amount to a member's base power, recalculates their tier, and checks progression achievements. |
+| `/reset` | Required `target` | Resets an existing profile to its fresh starting state. |
+
+`/setlevel` changes only the tier, `/setpower` replaces base power and
+recalculates the tier, and `/awardpower` adds to base power.
+
+For leaderboards with multiple pages, use the left and right reactions beneath
+the leaderboard to navigate. The controls are available to the person who ran
+the command for two minutes.
 
 ### Races and transformations
 

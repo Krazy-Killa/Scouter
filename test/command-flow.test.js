@@ -564,6 +564,38 @@ test("Beyond God awakening uses a 12-hour attempt cooldown and escalating pity c
     assert.equal(user.godKiAwakeningAttempts, 0);
 });
 
+test("Beyond God awakening persists every pity step through the guaranteed attempt", async () => {
+    const user = createDefaultUser("user", "guild", 0);
+    user.level = 50;
+    client.points.set("guild-user", user);
+    const originalNow = Date.now;
+    const originalRandom = Math.random;
+    let now = 13 * 60 * 60 * 1000;
+    const chanceSchedule = [5, 5, 5, 5, 10, 20, 40, 80, 100];
+    Date.now = () => now;
+    Math.random = () => 0.99;
+
+    try {
+        for (const [index, chance] of chanceSchedule.entries()) {
+            const attempt = createMessage("!transform beyondgod");
+            await handleMessage(attempt.message);
+
+            assert.equal(client.points.get("guild-user").godki, index === chanceSchedule.length - 1 ? 50 : 0);
+            assert.equal(
+                client.points.get("guild-user").godKiAwakeningAttempts,
+                index === chanceSchedule.length - 1 ? 0 : index + 1
+            );
+            if (index < chanceSchedule.length - 1) {
+                assert.match(getResponseText(attempt.sent[0]), new RegExp(`\\(${chance}% chance\\)`));
+                now += 12 * 60 * 60 * 1000;
+            }
+        }
+    } finally {
+        Date.now = originalNow;
+        Math.random = originalRandom;
+    }
+});
+
 test("first Saiyan SSG awakening requires five other persisted Saiyan profiles", async () => {
     const saiyan = createDefaultUser("user", "guild", 0);
     saiyan.race = "saiyan";
@@ -584,6 +616,48 @@ test("first Saiyan SSG awakening requires five other persisted Saiyan profiles",
     await handleMessage(createMessage("!transform ssg", "user", helpers).message);
     assert.equal(saiyan.godki, 50);
     assert.equal(saiyan.transformationForm, "ssg");
+});
+
+test("first Saiyan SSG awakening initializes and persists legacy helper profiles", async () => {
+    const saiyan = createDefaultUser("user", "guild", 0);
+    saiyan.race = "saiyan";
+    saiyan.level = 50;
+    client.points.set("guild-user", saiyan);
+    const helpers = Array.from({ length: 5 }, (_, index) => ({ id: `legacy-${index}`, username: `legacy-${index}` }));
+    for (const helper of helpers) {
+        const profile = createDefaultUser(helper.id, "guild", 0);
+        delete profile.race;
+        delete profile.godKiAwakeningAttempts;
+        delete profile.lastGodKiAwakeningAttemptAt;
+        client.points.set(`guild-${helper.id}`, profile);
+    }
+
+    await handleMessage(createMessage("!transform ssg", "user", helpers).message);
+
+    for (const helper of helpers) {
+        const persistedProfile = client.points.get(`guild-${helper.id}`);
+        assert.equal(persistedProfile.race, "saiyan");
+        assert.equal(persistedProfile.godKiAwakeningAttempts, 0);
+        assert.equal(persistedProfile.lastGodKiAwakeningAttemptAt, 0);
+    }
+    assert.equal(saiyan.godki, 50);
+    assert.equal(saiyan.transformationForm, "ssg");
+});
+
+test("first Saiyan SSG awakening does not create missing helper profiles", async () => {
+    const saiyan = createDefaultUser("user", "guild", 0);
+    saiyan.race = "saiyan";
+    saiyan.level = 50;
+    client.points.set("guild-user", saiyan);
+    const helpers = Array.from({ length: 5 }, (_, index) => ({ id: `missing-${index}`, username: `missing-${index}` }));
+
+    const attempt = createMessage("!transform ssg", "user", helpers);
+    await handleMessage(attempt.message);
+
+    assert.equal(saiyan.godki, 0);
+    assert.equal(saiyan.transformationForm, "normal");
+    assert.equal(helpers.every((helper) => !client.points.has(`guild-${helper.id}`)), true);
+    assert.match(getResponseText(attempt.replied[0]), /existing Saiyan progression profile/i);
 });
 
 test("first Saiyan SSG awakening rejects non-Saiyan helpers", async () => {

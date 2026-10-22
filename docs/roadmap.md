@@ -65,22 +65,16 @@ with maintainer capacity and community feedback; no release dates are promised.
   - Consider a private prompt for the opponent. Discord only allows ephemeral
     replies to the person who ran the command, so this would need a DM, with
     disabled DMs handled explicitly rather than silently proceeding.
-  - Add the combat bout, started once the target accepts (currently accepting
-    only closes the challenge). Proposed design:
-    - Automatic and narrated: 3-5 rounds shown by editing one embed, with a
-      result card showing effective power (`points x transformation`). No
-      move buttons, HP, damage or crits.
-    - Power-weighted randomness: the stronger fighter's chance per round is
-      capped (around 35-65%) on a ratio or log curve so upsets stay possible
-      and weaker players are not discouraged from accepting.
-    - Race perks (for example Saiyan comebacks) are a later addition.
-    - Stakes are temporary and cosmetic: no change to power or tier, and no
-      loot. Optionally charge a small equal stamina cost, blocking spars when
-      it is too low, and track win/loss counts with a few achievements.
-    - Add a per-pair cooldown (around 10 minutes) and a way to disable
-      challenges.
-    - Open questions: stamina cost or free, recorded results or not, and how
-      strongly the stronger fighter should be favored.
+  - **Done:** Accepting starts an automatic, narrated three-round bout in the
+    existing challenge message. Each round is weighted by effective power
+    (`points x transformation`): the stronger fighter's per-round chance rises
+    with the power ratio and is capped at 90%, so an underdog can still win.
+    The result shows both effective power readings. The bout has no HP, move
+    buttons, progression rewards, or stamina cost.
+  - Consider optional cosmetic win/loss records or achievements and a per-pair
+    cooldown (around 10 minutes); neither is part of the current bout.
+  - Race perks (for example Saiyan comebacks) are a later addition.
+  - Still decide whether to add a way for members to disable spar challenges.
 
 ## Guiding principles
 

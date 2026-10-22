@@ -2,14 +2,15 @@
 
 Notable changes to Scouter are documented here.
 
-## [Unreleased]
+## [0.7.0] - 2026-10-22
 
 ### Added
 
 - `/spar` challenge flow: the target gets Accept/Decline buttons, the challenger
   can cancel, challenges expire as declined after 5 minutes, and pending
-  challenges are persisted and restored after a restart. Combat outcomes are not
-  implemented yet.
+  challenges are persisted and restored after a restart. Acceptance now starts
+  a narrated three-round bout weighted by effective power, with a capped chance
+  that allows underdog wins. Sparring does not change progression or stamina.
 
 ### Changed
 
@@ -20,6 +21,8 @@ Notable changes to Scouter are documented here.
 
 - Expanded command-flow coverage for ignored messages, stamina recovery in and
   out of base form, and Discord member-lookup failures.
+- Added spar-bout coverage for effective-power weighting, three-round results,
+  underdog wins, and no progression or stamina changes.
 
 ## [0.6.5] - 2026-10-21
 

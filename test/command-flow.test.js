@@ -4,7 +4,13 @@ const { MessageFlags } = require("discord.js");
 const { client, handleButtonInteraction, handleInteraction, handleMessage, SLASH_COMMANDS } = require("../xp");
 const { createDefaultUser } = require("../progression");
 const { slashCommandCooldowns } = require("../commands/slash-commands");
-const { SPAR_CHALLENGE_TTL_MS, expireChallenge } = require("../commands/spar");
+const {
+    calculateRoundWinChance,
+    SPAR_CHALLENGE_TTL_MS,
+    SPAR_ROUND_COUNT,
+    expireChallenge,
+    resolveSparBout
+} = require("../commands/spar");
 
 class TestStore extends Map {
     filter(predicate) {
@@ -1309,7 +1315,10 @@ test("only the opponent can accept a spar and it resolves exactly once", async (
     const accept = createButton("accept", challenge.id, "opponent");
     await handleButtonInteraction(accept.interaction);
     const update = accept.updates[0];
-    assert.match(update.embeds[0].data.description, /accepted/i);
+    assert.equal(update.embeds[0].data.title, "🥊 Spar Complete!");
+    assert.equal((update.embeds[0].data.description.match(/\*\*Round \d:/g) || []).length, SPAR_ROUND_COUNT);
+    assert.match(update.embeds[0].data.description, /Winner:/);
+    assert.match(update.embeds[0].data.description, /no effect on progression or stamina/i);
     assert.equal(update.components[0].components.every((button) => button.data.disabled), true);
     assert.deepEqual(update.allowedMentions, { users: [] });
     assert.equal(client.sparChallenges.size, 0);
@@ -1318,6 +1327,50 @@ test("only the opponent can accept a spar and it resolves exactly once", async (
     await handleButtonInteraction(repeat.interaction);
     assert.equal(repeat.updates.length, 0);
     assert.match(getResponseText({ payload: repeat.replies[0] }), /no longer active/i);
+});
+
+test("effective power strongly favors the stronger fighter while retaining upset chances", () => {
+    assert.equal(calculateRoundWinChance(1000, 1000), 0.5);
+    assert.ok(calculateRoundWinChance(100000, 10000) > 0.85);
+    assert.ok(calculateRoundWinChance(100000, 10000) <= 0.9);
+    assert.ok(calculateRoundWinChance(10000, 100000) < 0.15);
+    assert.ok(calculateRoundWinChance(10000, 100000) > 0);
+});
+
+test("spar bout resolves exactly three narrated rounds from effective power without changing profiles", () => {
+    const challenger = createDefaultUser("challenger", "guild", 0);
+    challenger.points = 100000;
+    challenger.race = "saiyan";
+    challenger.level = 21;
+    challenger.transformationForm = "ssj";
+    const opponent = createDefaultUser("opponent", "guild", 0);
+    opponent.points = 10000;
+    opponent.transformation = 1;
+    challenger.stamina = 4321;
+    opponent.stamina = 8765;
+    client.points.set("guild-challenger", challenger);
+    client.points.set("guild-opponent", opponent);
+    const before = [challenger.points, challenger.stamina, opponent.points, opponent.stamina];
+    const challenge = {
+        id: "bout",
+        guildID: "guild",
+        challengerID: "challenger",
+        opponentID: "opponent"
+    };
+
+    const underdogWins = resolveSparBout(challenge, client, () => 0.99);
+    assert.match(underdogWins.embeds[0].data.description, /Winner: <@opponent>/);
+    assert.match(underdogWins.embeds[0].data.description, /5M effective power/);
+    assert.match(underdogWins.embeds[0].data.description, /10K effective power/);
+    assert.equal((underdogWins.embeds[0].data.description.match(/\*\*Round \d:/g) || []).length, 3);
+    assert.deepEqual(
+        [challenger.points, challenger.stamina, opponent.points, opponent.stamina],
+        before
+    );
+    assert.equal(challenger.transformation, 50);
+
+    const strongerWins = resolveSparBout(challenge, client, () => 0);
+    assert.match(strongerWins.embeds[0].data.description, /Winner: <@challenger>/);
 });
 
 test("the opponent can decline and only the challenger can cancel a spar", async () => {

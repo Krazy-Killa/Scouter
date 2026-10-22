@@ -1,18 +1,81 @@
 const { randomUUID } = require("node:crypto");
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require("discord.js");
+const { initializeUserProgress } = require("../progression");
+const { formatPowerAmount } = require("./power-format");
 const { toEmbedPayload } = require("./response-embeds");
 
 const SPAR_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const SPAR_CUSTOM_ID_PREFIX = "spar";
+const SPAR_ROUND_COUNT = 3;
+const MAX_ROUND_WIN_CHANCE = 0.9;
 const expiryTimers = new Map();
 
 const STATUS_DETAILS = {
-    accepted: { color: "#08ff00", text: (c) => `✅ <@${c.opponentID}> accepted the challenge. Both fighters are ready!` },
     declined: { color: "#FF0000", text: (c) => `❌ <@${c.opponentID}> declined the challenge.` },
     cancelled: { color: "#808080", text: (c) => `🚫 <@${c.challengerID}> cancelled the challenge.` },
     expired: { color: "#808080", text: (c) => `⌛ <@${c.opponentID}> did not respond in time, so the challenge was declined.` },
     unavailable: { color: "#808080", text: () => "🚫 A fighter is no longer available, so the challenge was closed." }
 };
+
+function calculateRoundWinChance(challengerPower, opponentPower) {
+    const ratio = Math.max(challengerPower, opponentPower) / Math.max(1, Math.min(challengerPower, opponentPower));
+    const strongerChance = Math.min(
+        MAX_ROUND_WIN_CHANCE,
+        0.5 + (MAX_ROUND_WIN_CHANCE - 0.5) * (1 - Math.exp(-Math.log(ratio)))
+    );
+    return challengerPower >= opponentPower ? strongerChance : 1 - strongerChance;
+}
+
+function resolveSparBout(challenge, client, random = Math.random) {
+    const challenger = client.points.get(`${challenge.guildID}-${challenge.challengerID}`);
+    const opponent = client.points.get(`${challenge.guildID}-${challenge.opponentID}`);
+    initializeUserProgress(challenger);
+    initializeUserProgress(opponent);
+    client.points.set(`${challenge.guildID}-${challenge.challengerID}`, challenger);
+    client.points.set(`${challenge.guildID}-${challenge.opponentID}`, opponent);
+    const challengerPower = challenger.points * challenger.transformation;
+    const opponentPower = opponent.points * opponent.transformation;
+    const challengerWinChance = calculateRoundWinChance(challengerPower, opponentPower);
+    const roundWinners = [];
+
+    for (let round = 0; round < SPAR_ROUND_COUNT; round += 1) {
+        roundWinners.push(random() < challengerWinChance
+            ? challenge.challengerID
+            : challenge.opponentID);
+    }
+
+    const challengerWins = roundWinners.filter((winner) => winner === challenge.challengerID).length;
+    const winnerID = challengerWins > SPAR_ROUND_COUNT / 2
+        ? challenge.challengerID
+        : challenge.opponentID;
+    const roundLines = roundWinners.map((winnerID, index) =>
+        `**Round ${index + 1}:** <@${winnerID}> ${[
+            "finds an opening and lands a clean strike",
+            "turns the momentum with a sharp counter",
+            "pushes through the exchange and scores a hit"
+        ][index]}.`
+    );
+    const resultEmbed = new EmbedBuilder()
+        .setTitle("🥊 Spar Complete!")
+        .setColor("#08ff00")
+        .setDescription([
+            `**${SPAR_ROUND_COUNT} narrated rounds**`,
+            "",
+            ...roundLines,
+            "",
+            `🏆 **Winner: <@${winnerID}>**`,
+            `<@${challenge.challengerID}>: ${formatPowerAmount(challengerPower)} effective power`,
+            `<@${challenge.opponentID}>: ${formatPowerAmount(opponentPower)} effective power`,
+            "",
+            "Friendly sparring has no effect on progression or stamina."
+        ].join("\n"));
+
+    return {
+        embeds: [resultEmbed],
+        components: [buildButtons(challenge.id, true)],
+        allowedMentions: { users: [] }
+    };
+}
 
 function getActiveChallenge(client, guildId, userId, now) {
     return client.sparChallenges.filter((challenge) =>
@@ -190,24 +253,32 @@ async function handleSparButton(interaction, { client, now = Date.now() }) {
     }
 
     let status = { accept: "accepted", decline: "declined", cancel: "cancelled" }[action];
+    let responsePayload;
     if (status === "accepted") {
         const fighterKeys = [challenge.challengerID, challenge.opponentID]
             .map((id) => `${challenge.guildID}-${id}`);
         const available = fighterKeys.every((key) => !client.privacy.get(key) && client.points.get(key));
-        if (!available) status = "unavailable";
+        if (!available) {
+            status = "unavailable";
+        } else {
+            responsePayload = resolveSparBout(challenge, client);
+        }
     }
 
     // Remove the challenge before responding so duplicate clicks cannot resolve it twice.
     clearExpiryTimer(challengeId);
     client.sparChallenges.delete(challengeId);
-    await interaction.update(buildChallengePayload(challenge, status));
+    await interaction.update(responsePayload || buildChallengePayload(challenge, status));
 }
 
 module.exports = {
+    calculateRoundWinChance,
     SPAR_CHALLENGE_TTL_MS,
+    SPAR_ROUND_COUNT,
     SPAR_CUSTOM_ID_PREFIX,
     expireChallenge,
     handleSparButton,
     handleSparCommand,
+    resolveSparBout,
     restoreSparChallenges
 };

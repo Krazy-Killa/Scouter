@@ -87,7 +87,7 @@ are not automatically deleted.
 | `/leaderboard` | — | Shows all-time server rankings, 10 users per page, ordered by displayed power. Use the left and right reactions to change pages. |
 | `/achievements` | — | Lists unlocked and locked achievements. |
 | `/train` | — | Trades stamina for a one-time power reward. It can be used once every 24 hours. |
-| `/spar` | Required `target` | Challenges a member to a friendly spar. Only the challenged member can accept or decline with buttons, the challenger can cancel, and unanswered challenges expire as declined after 5 minutes. Both members need profiles and cannot be opted out. Combat results are not implemented yet. |
+| `/spar` | Required `target` | Challenges a member to a friendly spar. Only the challenged member can accept or decline with buttons, the challenger can cancel, and unanswered challenges expire as declined after 5 minutes. Both members need profiles and cannot be opted out. On acceptance, the bot narrates a three-round bout weighted by effective power; underdog wins are possible. Sparring does not change progression or stamina. |
 | `/transform` | Required `form`; optional `helper1`–`helper5` | Changes to an unlocked racial or universal transformation. Select five distinct other Saiyan helpers at Tier 21 or higher for a first-time SSG awakening. |
 | `/kaioken` | Required `level` | Activates x2/x3/x4/x10 or disables the universal Kaioken ability. |
 | `/revert` | — | Automatically returns you to your normal form (Beyond God if you have God Ki). |
